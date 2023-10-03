@@ -1,0 +1,31 @@
+{
+  "name": "r2-registry",
+  "version": "1.0.0",
+  "description": "An open-source R2 registry",
+  "main": "index.ts",
+  "scripts": {
+    "deploy": "wrangler publish",
+    "dev:miniflare": "cross-env NODE_ENV=development wrangler --env dev dev --port 9999 --live-reload",
+    "typecheck": "tsc",
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules vitest run"
+  },
+  "dependencies": {
+    "@tsndr/cloudflare-worker-jwt": "^2.2.1",
+    "itty-router": "^4.0.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231002.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.38.0",
+    "miniflare": "3.20230918.0",
+    "typescript": "^4.9.5",
+    "vitest": "^0.31.4",
+    "vitest-environment-miniflare": "^2.14.1",
+    "wrangler": "^3.16.0"
+  },
+  "engines": {
+    "node": ">=16.13"
+  },
+  "author": "",
+  "license": "ISC"
+}

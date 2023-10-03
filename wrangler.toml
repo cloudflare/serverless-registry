@@ -1,0 +1,44 @@
+name = "r2-registry"
+
+workers_dev = true
+main = "./index.ts"
+compatibility_date = "2022-04-18"
+compatibility_flags = ["streams_enable_constructors"]
+logpush = true
+
+## Production
+[env.production]
+r2_buckets = [
+    { binding = "REGISTRY", bucket_name = ""}
+]
+kv_namespaces = [
+    { binding = "UPLOADS", id = "" }
+]
+
+[env.production.vars]
+JWT_REGISTRY_TOKENS_PUBLIC_KEY=""
+
+# Secrets:
+# JWT_STATE_SECRET
+# echo `node -e "console.log(crypto.randomUUID())"` | wrangler secret put JWT_STATE_SECRET
+
+# Optional Secrets
+# USERNAME/PASSWORD if you want username/password based auth
+
+
+
+## Dev - For local dev using `wrangler dev`
+[env.dev]
+r2_buckets = [
+    { binding = "REGISTRY", bucket_name = "r2-image-registry-dev"}
+]
+kv_namespaces = [
+    { binding = "UPLOADS", id = "abcd" }
+]
+[env.dev.vars]
+JWT_STATE_SECRET = "HELLO"
+USERNAME="hello"
+PASSWORD="world"
+# The necessary secrets are:
+# Setup those secrets on .dev.vars in the root of the project
+#
