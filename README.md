@@ -54,11 +54,11 @@ $ wrangler deploy --env production
 Your registry should be up and running. It will refuse any requests if you don't setup credentials.
 
 ### Adding username password based authentication
-Set the USERNAME and PASSWORD as secrets with `wrangler secret put USERNAME` and `wrangler secret put PASSWORD`.
+Set the USERNAME and PASSWORD as secrets with `wrangler secret put USERNAME --env production` and `wrangler secret put PASSWORD --env production`.
 
 ### Adding JWT authentication with public key
 You can add a base64 encoded JWT public key to verify passwords (or token) that are signed by the private key.
-`wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY`
+`wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY --env production`
 
 ### Known limitations
 Right now there is some limitations with this docker registry.
