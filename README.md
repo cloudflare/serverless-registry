@@ -43,7 +43,7 @@ kv_namespaces = [
 3. Setup the JWT_STATE_SECRET secret binding
 
 ```bash
-$ echo `node -e "console.log(crypto.randomUUID())"` | wrangler --env production secret put JWT_STATE_SECRET
+$ node -p 'crypto.randomUUID()' | wrangler --env production secret put JWT_STATE_SECRET
 ```
 
 4. Deploy your image registry
