@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SHA256_PREFIX_LEN, getSHA256 } from "./src/user";
 import v2Router, { TagsList } from "./src/router";
 import { Env } from ".";
@@ -6,6 +6,7 @@ import * as fetchAuth from "./index";
 import { RegistryTokens } from "./src/token";
 import { RegistryAuthProtocolTokenPayload } from "./src/auth";
 import { registries } from "./src/registry/registry";
+import { RegistryHTTPClient } from "./src/registry/http";
 
 function createRequest(method: string, path: string, body: ReadableStream | null, headers = {}) {
   return new Request(new URL("https://registry.com" + path), { method, body: body, headers });
@@ -320,6 +321,7 @@ test("registries configuration", async () => {
     bindingCopy.REGISTRIES_JSON = testCase.configuration;
     const expectErrorOutput = testCase.error !== "";
     let calledError = false;
+    const prevConsoleError = console.error;
     console.error = (output) => {
       if (!testCase.partialError) {
         expect(output).toEqual(testCase.error);
@@ -332,5 +334,41 @@ test("registries configuration", async () => {
     const r = registries(bindingCopy);
     expect(r).toEqual(testCase.expected);
     expect(calledError).toEqual(expectErrorOutput);
+    console.error = prevConsoleError;
   }
+});
+
+describe("http client", () => {
+  let envBindings = { ...bindings };
+  const prevFetch = global.fetch;
+  beforeEach(() => {
+    global.fetch = async function (info, init) {
+      const r = new Request(info, init);
+      return fetchAuth.default.fetch(r, envBindings);
+    };
+  });
+
+  afterAll(() => {
+    global.fetch = prevFetch;
+  });
+
+  test("test manifest exists", async () => {
+    envBindings = { ...bindings };
+    envBindings.JWT_STATE_SECRET = "hello";
+    envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
+    envBindings.PASSWORD = "123456";
+    envBindings.USERNAME = "v1";
+    envBindings.REGISTRIES_JSON = undefined;
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://localhost",
+      password_env: "PASSWORD",
+      username: "v1",
+    });
+    const res = await client.manifestExists("namespace/hello", "latest");
+    if ("response" in res) {
+      expect(await res.response.json()).toEqual({ status: res.response.status });
+    }
+
+    expect("exists" in res && res.exists).toBe(false);
+  });
 });
