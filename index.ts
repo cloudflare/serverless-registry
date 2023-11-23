@@ -3,7 +3,7 @@
  */
 
 import { Router } from "itty-router";
-import { AuthErrorResponse } from "./src/errors";
+import { AuthErrorResponse, InternalError } from "./src/errors";
 import v2Router from "./src/router";
 import { authenticationMethodFromEnv } from "./src/authentication-method";
 
@@ -20,6 +20,7 @@ export interface Env {
   JWT_STATE_SECRET: string;
   UPLOADS: KVNamespace;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
+  REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
 }
 
 const router = Router();
@@ -48,27 +49,55 @@ export default {
       return new AuthErrorResponse(request);
     }
 
-    // Dispatch the request to the appropriate route
-    return router.handle(request, env);
+    try {
+      // Dispatch the request to the appropriate route
+      const res = await router.handle(request, env);
+      return res;
+    } catch (err) {
+      if (err instanceof Response) {
+        console.warn(`${request.method} ${err.status} ${err.url}`);
+        return err;
+      }
+
+      // Unexpected error
+      if (err instanceof Error) {
+        console.error(
+          "An error has been thrown by the router:\n",
+          `${err.name}: ${err.message}: ${err.cause}: ${err.stack}`,
+        );
+        return new InternalError();
+      }
+
+      console.error(
+        "An error has been thrown and is neither a Response or an Error, JSON.stringify() =",
+        JSON.stringify(err),
+      );
+      return new InternalError();
+    }
   },
 };
 
-
 const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
-    console.error("env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'wrangler --env production r2 bucket create r2-registry'");
+    console.error(
+      "env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'wrangler --env production r2 bucket create r2-registry'",
+    );
     return false;
   }
 
   if (!env.UPLOADS) {
-    console.error("env.UPLOADS is not setup. Please setup a KV namespace and add the binding in wrangler.toml. Try 'wrangler --env production kv:namespace create r2_registry_uploads'");
+    console.error(
+      "env.UPLOADS is not setup. Please setup a KV namespace and add the binding in wrangler.toml. Try 'wrangler --env production kv:namespace create r2_registry_uploads'",
+    );
     return false;
   }
 
   if (!env.JWT_STATE_SECRET) {
-    console.error(`env.JWT_STATE_SECRET is not set. Please setup this secret using wrnagler. Try 'echo \`node -e "console.log(crypto.randomUUID())"\` | wrangler --env production secret put JWT_STATE_SECRET'`);
+    console.error(
+      `env.JWT_STATE_SECRET is not set. Please setup this secret using wrnagler. Try 'echo \`node -e "console.log(crypto.randomUUID())"\` | wrangler --env production secret put JWT_STATE_SECRET'`,
+    );
     return false;
   }
 
   return true;
-}
+};
