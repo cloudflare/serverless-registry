@@ -1,3 +1,5 @@
+import { ZodError } from "zod";
+
 export async function readableToBlob(
   reader: ReadableStreamDefaultReader,
   ...multiwriters: WritableStreamDefaultWriter[]
@@ -41,4 +43,19 @@ export async function consumeReadable(reader: ReadableStreamDefaultReader) {
     const value = await reader.read();
     if (value.done) break;
   }
+}
+
+export function errorString(err: unknown): string {
+  if (err instanceof ZodError) {
+    const errorsMsg = err.errors
+      .map((zodIssue) => `- ${zodIssue.code}: ${zodIssue.message}: ${zodIssue.path}`)
+      .join("\n\t");
+    return `zod error: ${errorsMsg}`;
+  }
+
+  if (err instanceof Error) {
+    return `error ${err.name}: ${err.message}: ${err.cause}: ${err.stack}`;
+  }
+
+  return "unknown error: " + JSON.stringify(err);
 }

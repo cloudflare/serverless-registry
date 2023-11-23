@@ -5,6 +5,7 @@ import { Env } from ".";
 import * as fetchAuth from "./index";
 import { RegistryTokens } from "./src/token";
 import { RegistryAuthProtocolTokenPayload } from "./src/auth";
+import { registries } from "./src/registry/registry";
 
 function createRequest(method: string, path: string, body: ReadableStream | null, headers = {}) {
   return new Request(new URL("https://registry.com" + path), { method, body: body, headers });
@@ -228,4 +229,108 @@ describe("tokens", async () => {
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeTruthy();
   });
+});
+
+test("registries configuration", async () => {
+  const testCases = [
+    {
+      configuration: undefined,
+      expected: [],
+      error: "",
+      partialError: false,
+    },
+    {
+      configuration: "[]",
+      expected: [],
+      error: "",
+      partialError: false,
+    },
+    {
+      configuration: "{}",
+      expected: [],
+      error: "Error parsing registries JSON: zod error: - invalid_type: Expected array, received object: ",
+      partialError: false,
+    },
+    {
+      configuration: "[{}]",
+      expected: [],
+      error:
+        "Error parsing registries JSON: zod error: - invalid_type: Required: 0,registry\n\t- invalid_type: Required: 0,password_env\n\t- invalid_type: Required: 0,username",
+      partialError: false,
+    },
+    {
+      configuration: `[{ "registry": "no-url/hello-world" }]`,
+      expected: [],
+      error:
+        "Error parsing registries JSON: zod error: - invalid_string: Invalid url: 0,registry\n\t- invalid_type: Required: 0,password_env\n\t- invalid_type: Required: 0,username",
+      partialError: false,
+    },
+    {
+      configuration: "bla bla bla no json",
+      expected: [],
+      error:
+        "Error parsing registries JSON: error SyntaxError: Unexpected token b in JSON at position 0: undefined: SyntaxError: Unexpected token b in JSON at position 0\n",
+      partialError: true,
+    },
+    {
+      configuration: `[{
+        "registry": "https://hello.com/domain",
+        "username": "hello world",
+        "password_env": "PASSWORD_ENV"
+      }]`,
+      expected: [
+        {
+          registry: "https://hello.com/domain",
+          username: "hello world",
+          password_env: "PASSWORD_ENV",
+        },
+      ],
+      partialError: false,
+      error: "",
+    },
+    {
+      configuration: `[{
+        "registry": "https://hello.com/domain",
+        "username": "hello world",
+        "password_env": "PASSWORD_ENV"
+      }, {
+        "registry": "https://hello2.com/domain",
+        "username": "hello world 2",
+        "password_env": "PASSWORD_ENV 2"
+      }]`,
+      expected: [
+        {
+          registry: "https://hello.com/domain",
+          username: "hello world",
+          password_env: "PASSWORD_ENV",
+        },
+        {
+          registry: "https://hello2.com/domain",
+          username: "hello world 2",
+          password_env: "PASSWORD_ENV 2",
+        },
+      ],
+      partialError: false,
+      error: "",
+    },
+  ] as const;
+
+  const bindingCopy = { ...bindings };
+  for (const testCase of testCases) {
+    bindingCopy.REGISTRIES_JSON = testCase.configuration;
+    const expectErrorOutput = testCase.error !== "";
+    let calledError = false;
+    console.error = (output) => {
+      if (!testCase.partialError) {
+        expect(output).toEqual(testCase.error);
+      } else {
+        expect(output).toContain(testCase.error);
+      }
+
+      calledError = true;
+    };
+    const r = registries(bindingCopy);
+    expect(r).toEqual(testCase.expected);
+    expect(calledError).toEqual(expectErrorOutput);
+  }
 });
