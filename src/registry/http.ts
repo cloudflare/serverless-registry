@@ -6,6 +6,8 @@ import {
   CheckLayerResponse,
   CheckManifestResponse,
   FinishedUploadObject,
+  GetLayerResponse,
+  GetManifestResponse,
   Registry,
   RegistryConfiguration,
   RegistryError,
@@ -145,6 +147,15 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
+  async monolithicUpload(
+    _namespace: string,
+    _stream: ReadableStream<any>,
+    _size: number,
+  ): Promise<false | FinishedUploadObject | RegistryError> {
+    // please, just give me chunked things
+    return false;
+  }
+
   async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams): Promise<Response> {
     params.delete("password");
     return await fetch(ctx.realm + params.toString(), {
@@ -224,7 +235,7 @@ export class RegistryHTTPClient implements Registry {
     };
   }
 
-  async manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse> {
+  async manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`));
@@ -237,6 +248,8 @@ export class RegistryHTTPClient implements Registry {
       return {
         exists: res.ok,
         digest: res.headers.get("Docker-Content-Digest") as string,
+        size: +(res.headers.get("Content-Length") ?? "0"),
+        contentType: res.headers.get("Content-Type") ?? "",
       };
     } catch (err) {
       console.error(`Error doing manifest exists with ${namespace} and ${tag}: ` + errorString(err));
@@ -246,7 +259,7 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async getManifest(namespace: string, digest: string): Promise<ReadableStream | RegistryError> {
+  async getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
       const res = await fetch(ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`));
@@ -260,7 +273,12 @@ export class RegistryHTTPClient implements Registry {
         throw new Error("body is null");
       }
 
-      return res.body;
+      return {
+        size: +(res.headers.get("Content-Length") ?? "0"),
+        stream: res.body,
+        digest: res.headers.get("Docker-Content-Digest") ?? digest,
+        contentType: res.headers.get("Content-Type") ?? "",
+      };
     } catch (err) {
       console.error(`Error doing get manifest with ${namespace} and ${digest}: ` + errorString(err));
       return {
@@ -269,7 +287,7 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async layerExists(namespace: string, digest: string): Promise<CheckLayerResponse> {
+  async layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
@@ -298,6 +316,7 @@ export class RegistryHTTPClient implements Registry {
       return {
         exists: true,
         size: contentLength,
+        digest: res.headers.get("Docker-Content-Digest") ?? digest,
       };
     } catch (err) {
       console.error(`Error doing layer exists with ${namespace} and ${digest}: ` + errorString(err));
@@ -307,7 +326,7 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async getLayer(namespace: string, digest: string): Promise<ReadableStream | RegistryError> {
+  async getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
       const res = await fetch(ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`));
@@ -321,7 +340,11 @@ export class RegistryHTTPClient implements Registry {
         throw new Error("returned body is null");
       }
 
-      return res.body;
+      return {
+        stream: res.body,
+        size: +(res.headers.get("Content-Length") ?? "0"),
+        digest: res.headers.get("Digest-Content-Digest") ?? digest,
+      };
     } catch (err) {
       console.error(`Error doing get layer with ${namespace} and ${digest}: ` + errorString(err));
       return {

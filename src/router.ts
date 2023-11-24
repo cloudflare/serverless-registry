@@ -15,6 +15,14 @@ import {
   split,
   MAXIMUM_CHUNK_UPLOAD_SIZE,
 } from "./chunk";
+import {
+  CheckLayerResponse,
+  CheckManifestResponse,
+  GetLayerResponse,
+  GetManifestResponse,
+  registries,
+} from "./registry/registry";
+import { RegistryHTTPClient } from "./registry/http";
 
 export const REGISTRY_ACCOUNT_ID_HEADER_NAME = "registry-account-id";
 
@@ -82,25 +90,48 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
 
 v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
   const { name, reference } = req.params;
-
   const res = await env.REGISTRY.head(`${name}/manifests/${reference}`);
-
+  let checkManifestResponse: CheckManifestResponse | null = null;
   if (!res) {
-    return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
-  }
+    const registryList = registries(env);
+    for (const registry of registryList) {
+      const client = new RegistryHTTPClient(env, registry);
+      const response = await client.manifestExists(name, reference);
+      if ("response" in response) {
+        continue;
+      }
 
-  const digestHeader: Record<string, string> = {};
-  if (res.checksums.sha256 === null) {
-    throw new ServerError("invalid checksum from R2 backend");
-  }
+      if (response.exists) {
+        checkManifestResponse = {
+          size: response.size,
+          digest: response.digest,
+          contentType: response.contentType,
+          exists: true,
+        };
+        break;
+      }
+    }
 
-  digestHeader["Docker-Content-Digest"] = hexToDigest(res.checksums.sha256!);
+    if (checkManifestResponse === null || !checkManifestResponse.exists)
+      return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+  } else {
+    if (res.checksums.sha256 === null) {
+      throw new ServerError("invalid checksum from R2 backend");
+    }
+
+    checkManifestResponse = {
+      exists: true,
+      digest: hexToDigest(res.checksums.sha256!),
+      contentType: "application/gzip",
+      size: res.size,
+    };
+  }
 
   return new Response(null, {
     headers: {
-      "Content-Length": res.size.toString(),
-      "Content-Type": res.httpMetadata!.contentType!,
-      ...digestHeader,
+      "Content-Length": checkManifestResponse.size.toString(),
+      "Content-Type": checkManifestResponse.contentType,
+      "Docker-Content-Digest": checkManifestResponse.digest,
     },
   });
 });
@@ -109,23 +140,39 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env) => {
   const { name, reference } = req.params;
   const res: R2ObjectBody | null = await env.REGISTRY.get(`${name}/manifests/${reference}`);
 
+  let getManifestResponse: GetManifestResponse | null = null;
   if (!res) {
-    return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+    const registriesList = registries(env);
+    for (const registry of registriesList) {
+      const client = new RegistryHTTPClient(env, registry);
+      const response = await client.getManifest(name, reference);
+      if ("response" in response) {
+        continue;
+      }
+
+      getManifestResponse = response;
+      break;
+    }
+
+    if (getManifestResponse === null) return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+  } else {
+    if (res.checksums.sha256 === null) {
+      throw new ServerError("invalid checksum from R2 backend");
+    }
+
+    getManifestResponse = {
+      stream: res.body!,
+      digest: hexToDigest(res.checksums.sha256!),
+      size: res.size,
+      contentType: res.httpMetadata!.contentType!,
+    };
   }
 
-  const digestHeader: Record<string, string> = {};
-
-  if (res.checksums.sha256 === null) {
-    throw new ServerError("invalid checksum from R2 backend");
-  }
-
-  digestHeader["Docker-Content-Digest"] = hexToDigest(res.checksums.sha256!);
-
-  return new Response(res.body, {
+  return new Response(getManifestResponse.stream, {
     headers: {
-      "Content-Length": res.size.toString(),
-      "Content-Type": res.httpMetadata!.contentType!,
-      ...digestHeader,
+      "Content-Length": getManifestResponse.size.toString(),
+      "Content-Type": getManifestResponse.contentType,
+      "Docker-Content-Digest": getManifestResponse.digest,
     },
   });
 });
@@ -180,18 +227,38 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
 v2Router.get("/:name+/blobs/:digest", async (req, env: Env) => {
   const { name, digest } = req.params;
   const res: R2ObjectBody | null = await env.REGISTRY.get(`${name}/blobs/${digest}`);
+  let layerResponse: GetLayerResponse | null = null;
   if (!res) {
-    return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
+    const registriesList = registries(env);
+    for (const registry of registriesList) {
+      const client = new RegistryHTTPClient(env, registry);
+      const response = await client.getLayer(name, digest);
+      if ("response" in response) {
+        continue;
+      }
+
+      layerResponse = response;
+      break;
+    }
+
+    if (layerResponse === null) return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+  } else {
+    if (res.checksums.sha256 === null) {
+      throw new ServerError("invalid checksum from R2 backend");
+    }
+
+    layerResponse = {
+      stream: res.body!,
+      digest: hexToDigest(res.checksums.sha256!),
+      size: res.size,
+    };
   }
 
-  const digestHeader: Record<string, string> = {};
-  if (res.checksums.sha256 === null) {
-    throw new ServerError("invalid checksum from R2 backend");
-  }
-
-  digestHeader["Docker-Content-Digest"] = hexToDigest(res.checksums.sha256!);
-  return new Response(res.body, {
-    headers: { ...digestHeader, "Content-Length": `${res.size}`, "Content-Type": "application/gzip" },
+  return new Response(layerResponse.stream, {
+    headers: {
+      "Docker-Content-Digest": layerResponse.digest,
+      "Content-Length": `${layerResponse.size}`,
+    },
   });
 });
 
@@ -538,26 +605,44 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   });
 });
 
-v2Router.head("/:name+/blobs/:digest", async (req, env: Env) => {
-  const { name, digest } = req.params;
+v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
+  const { name, tag } = req.params;
 
-  const res = await env.REGISTRY.head(`${name}/blobs/${digest}`);
-
+  const res = await env.REGISTRY.head(`${name}/blobs/${tag}`);
+  let layerExistsResponse: CheckLayerResponse | null = null;
   if (!res) {
-    return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
-  }
+    const registryList = registries(env);
+    for (const registry of registryList) {
+      const client = new RegistryHTTPClient(env, registry);
+      const response = await client.layerExists(name, tag);
+      if ("response" in response) {
+        continue;
+      }
 
-  const digestHeader: Record<string, string> = {};
-  if (res.checksums.sha256 === null) {
-    throw new ServerError("invalid checksum from R2 backend");
-  }
+      if (response.exists) {
+        layerExistsResponse = response;
+        break;
+      }
+    }
 
-  digestHeader["Docker-Content-Digest"] = hexToDigest(res.checksums.sha256!);
+    if (layerExistsResponse === null || !layerExistsResponse.exists)
+      return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
+  } else {
+    if (res.checksums.sha256 === null) {
+      throw new ServerError("invalid checksum from R2 backend");
+    }
+
+    layerExistsResponse = {
+      digest: hexToDigest(res.checksums.sha256!),
+      size: res.size,
+      exists: true,
+    };
+  }
 
   return new Response(null, {
     headers: {
-      "Content-Length": res.size.toString(),
-      ...digestHeader,
+      "Content-Length": layerExistsResponse.size.toString(),
+      "Docker-Content-Digest": layerExistsResponse.digest,
     },
   });
 });

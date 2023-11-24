@@ -34,23 +34,24 @@ export type RegistryError = {
 export type CheckManifestResponse =
   | {
       exists: true;
+      size: number;
       digest: string;
+      contentType: string;
     }
   | {
       exists: false;
-    }
-  | RegistryError;
+    };
 
 // Response layerExists call
 export type CheckLayerResponse =
   | {
       exists: true;
       size: number;
+      digest: string;
     }
   | {
       exists: false;
-    }
-  | RegistryError;
+    };
 
 // represents an upload transaction id
 export type UploadId = string;
@@ -73,24 +74,47 @@ export type FinishedUploadObject = {
   location: string;
 };
 
+// returned by getManifest when it successfully retrieves a manifest
+export type GetManifestResponse = {
+  stream: ReadableStream;
+  digest: string;
+  size: number;
+  contentType: string;
+};
+
+// returned by getLayer when it successfully retrieves a layer
+export type GetLayerResponse = {
+  stream: ReadableStream;
+  digest: string;
+  size: number;
+};
+
 // Registry interface to an implementation
 export interface Registry {
   // All read operations supported by a registry
 
   // checks whether the manifest exists in the registry
-  manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse>;
+  manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError>;
 
   // gets the manifest by namespace + digest
-  getManifest(namespace: string, digest: string): Promise<ReadableStream | RegistryError>;
+  getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError>;
 
   // checks that a layer exists
-  layerExists(namespace: string, digest: string): Promise<CheckLayerResponse>;
+  layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError>;
 
   // get a layer stream from the registry
-  getLayer(namespace: string, digest: string): Promise<ReadableStream | RegistryError>;
+  getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError>;
 
   // starts a new upload
   startUpload(namespace: string): Promise<UploadObject | RegistryError>;
+
+  // does a monolithic upload. if it returns false it means that the registry doesn't
+  // support it and the caller should try to fallback to chunked upload
+  monolithicUpload(
+    namespace: string,
+    stream: ReadableStream,
+    size: number,
+  ): Promise<FinishedUploadObject | RegistryError | false>;
 
   // uploads a chunk
   uploadChunk(
