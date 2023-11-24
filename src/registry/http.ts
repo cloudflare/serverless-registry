@@ -1,4 +1,3 @@
-import { string } from "zod";
 import { Env } from "../..";
 import { InternalError } from "../errors";
 import { errorString } from "../utils";
@@ -8,9 +7,11 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  PutManifestResponse,
   Registry,
   RegistryConfiguration,
   RegistryError,
+  UploadId,
   UploadObject,
 } from "./registry";
 
@@ -353,23 +354,44 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
+  putManifest(
+    namespace: string,
+    reference: string,
+    readableStream: ReadableStream<any>,
+    contentType: string,
+  ): Promise<PutManifestResponse | RegistryError> {
+    throw new Error("unimplemented");
+  }
+
   startUpload(namespace: string): Promise<UploadObject | RegistryError> {
     throw new Error("unimplemented");
   }
 
-  uploadChunk(
-    uploadObject: UploadObject,
+  cancelUpload(namespace: string, uploadId: UploadId): Promise<true | RegistryError> {
+    throw new Error("unimplemented");
+  }
+
+  getUpload(namespace: string, uploadId: string): Promise<UploadObject | RegistryError> {
+    throw new Error("unimplemented");
+  }
+
+  async uploadChunk(
+    namespace: string,
+    location: string,
     stream: ReadableStream<any>,
     length?: number | undefined,
-  ): Promise<UploadObject | RegistryError> {
+    range?: [number, number] | undefined,
+  ): Promise<RegistryError | UploadObject> {
     throw new Error("unimplemented");
   }
 
   finishUpload(
-    uploadObject: UploadObject,
+    namespace: string,
+    location: string,
+    expectedSha: string,
     stream?: ReadableStream<any> | undefined,
     length?: number | undefined,
-  ): Promise<FinishedUploadObject | RegistryError> {
+  ): Promise<RegistryError | FinishedUploadObject> {
     throw new Error("unimplemented");
   }
 }

@@ -1,4 +1,5 @@
 import { Env } from "../..";
+import { InternalError } from "../errors";
 import { errorString } from "../utils";
 import z from "zod";
 
@@ -70,7 +71,6 @@ export type UploadObject = {
 // response when you finish an upload
 export type FinishedUploadObject = {
   digest: string;
-  range: [number, number];
   location: string;
 };
 
@@ -89,6 +89,12 @@ export type GetLayerResponse = {
   size: number;
 };
 
+// returned by putManifest when it successfully uploads a manifest
+export type PutManifestResponse = {
+  digest: string;
+  location: string;
+};
+
 // Registry interface to an implementation
 export interface Registry {
   // All read operations supported by a registry
@@ -105,8 +111,22 @@ export interface Registry {
   // get a layer stream from the registry
   getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError>;
 
+  // put manifest uploads a manifest into the registry
+  putManifest(
+    namespace: string,
+    reference: string,
+    readableStream: ReadableStream<any>,
+    contentType: string,
+  ): Promise<PutManifestResponse | RegistryError>;
+
   // starts a new upload
   startUpload(namespace: string): Promise<UploadObject | RegistryError>;
+
+  // cancels an upload
+  cancelUpload(namespace: string, uploadId: UploadId): Promise<true | RegistryError>;
+
+  // gets an existing upload
+  getUpload(namespace: string, uploadId: UploadId): Promise<UploadObject | RegistryError>;
 
   // does a monolithic upload. if it returns false it means that the registry doesn't
   // support it and the caller should try to fallback to chunked upload
@@ -118,16 +138,27 @@ export interface Registry {
 
   // uploads a chunk
   uploadChunk(
-    uploadObject: UploadObject,
+    namespace: string,
+    location: string,
     stream: ReadableStream,
-    // for a more optimal upload
+    // for a more optimal upload. Some clients might require it
     length?: number,
+    range?: [number, number] | undefined,
   ): Promise<UploadObject | RegistryError>;
 
   // finishes an upload
   finishUpload(
-    uploadObject: UploadObject,
+    namespace: string,
+    location: string,
+    expectedDigest: string,
     stream?: ReadableStream,
     length?: number,
   ): Promise<FinishedUploadObject | RegistryError>;
+}
+
+export function wrapError(method: string, err: unknown): RegistryError {
+  console.error(method, "error:", errorString(err));
+  return {
+    response: new InternalError(),
+  };
 }
