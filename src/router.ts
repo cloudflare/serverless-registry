@@ -81,7 +81,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   });
 });
 
-v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
+v2Router.head("/:name+/manifests/:reference", async (req, env: Env, context: ExecutionContext) => {
   const { name, reference } = req.params;
   const res = await env.REGISTRY_CLIENT.manifestExists(name, reference);
   if ("exists" in res && res.exists) {
@@ -110,6 +110,30 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
         contentType: response.contentType,
         exists: true,
       };
+
+      // If the error is that it doesn't exist
+      if ("exists" in res && !res.exists) {
+        const manifestResponse = await client.getManifest(name, response.digest);
+        if ("response" in manifestResponse) {
+          console.warn(
+            "Can't sync with fallback registry because it has returned an error:",
+            manifestResponse.response.status,
+          );
+          break;
+        }
+
+        const [putResponse, err] = await wrap(
+          env.REGISTRY_CLIENT.putManifest(name, reference, manifestResponse.stream, manifestResponse.contentType),
+        );
+        if (err) {
+          console.error("Error sync manifest into client:", errorString(err));
+        }
+
+        if (putResponse && "response" in putResponse) {
+          console.error("Error sync manifest into client (non 200 status):", putResponse.response.status);
+        }
+      }
+
       break;
     }
   }
@@ -126,7 +150,7 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
   });
 });
 
-v2Router.get("/:name+/manifests/:reference", async (req, env: Env) => {
+v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: ExecutionContext) => {
   const { name, reference } = req.params;
   const res = await env.REGISTRY_CLIENT.getManifest(name, reference);
   if (!("response" in res)) {
@@ -149,6 +173,29 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env) => {
     }
 
     getManifestResponse = response;
+    console.log("Res:", res.response.status);
+    if (res.response.status !== 404) {
+      // Don't upload the manifest if there is an error
+      break;
+    }
+
+    const [s1, s2] = getManifestResponse.stream.tee();
+    getManifestResponse.stream = s1;
+    context.waitUntil(
+      (async () => {
+        const [response, err] = await wrap(
+          env.REGISTRY_CLIENT.putManifest(name, reference, s2, getManifestResponse.contentType),
+        );
+        if (err) {
+          console.error("Error uploading asynchronously the manifest ", reference, "into main registry");
+          return;
+        }
+
+        if (response && "response" in response) {
+          console.error("Error uploading asynchronously manifest:", response.response.status);
+        }
+      })(),
+    );
     break;
   }
 
@@ -189,7 +236,7 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
   });
 });
 
-v2Router.get("/:name+/blobs/:digest", async (req, env: Env) => {
+v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionContext) => {
   const { name, digest } = req.params;
   const res = await env.REGISTRY_CLIENT.getLayer(name, digest);
   if (!("response" in res)) {
@@ -211,6 +258,21 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env) => {
     }
 
     layerResponse = response;
+    const [s1, s2] = layerResponse.stream.tee();
+    layerResponse.stream = s1;
+    context.waitUntil(
+      (async () => {
+        const [response, err] = await wrap(env.REGISTRY_CLIENT.monolithicUpload(name, digest, s2, layerResponse.size));
+        if (err) {
+          console.error("Error uploading asynchronously the layer ", digest, "into main registry");
+          return;
+        }
+
+        if (response === false) {
+          console.error("Layer might be too big for the registry client", layerResponse.size);
+        }
+      })(),
+    );
     break;
   }
 

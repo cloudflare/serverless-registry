@@ -34,14 +34,38 @@ type HTTPContext = {
   accessToken: string;
 };
 
+export const manifestTypes = [
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.docker.distribution.manifest.v1+prettyjws",
+  "application/json",
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+] as const;
+
+export type ManifestType = (typeof manifestTypes)[number];
+
 function ctxIntoHeaders(ctx: HTTPContext): Headers {
   const headers = new Headers();
+  if (ctx.authContext.authType === "none") {
+    console.warn(
+      "Your registry",
+      ctx.authContext.service,
+      "is not using any kind of authentication, making it exposed to the internet",
+    );
+    return headers;
+  }
+
   headers.append("Authorization", (ctx.authContext.authType === "basic" ? "Basic" : "Bearer") + " " + ctx.accessToken);
   return headers;
 }
 
 function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string, body?: BodyInit): Request {
-  return new Request(`${url.protocol}//${ctx.authContext.service}/v2/${ctx.repository}${path}`, {
+  const urlReq = `${url.protocol}//${ctx.authContext.service}/v2${
+    ctx.repository === "" ? "/" : ctx.repository + "/"
+  }${path}`;
+  console.log("Doing request:", urlReq);
+  return new Request(urlReq, {
     method,
     body,
     headers: ctxIntoHeaders(ctx),
@@ -60,6 +84,8 @@ function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): 
     case "bearer":
     case "basic":
       break;
+    case "none":
+      throw new Error("unsupported auth type for getting an auth context");
     default:
       throw new Error(`unsupported auth type in WWW-Authenticate on registry ${url}: ${parts[0]}`);
   }
@@ -126,9 +152,28 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async authenticate(): Promise<HTTPContext> {
-    const res = await fetch(`${this.url.protocol}//${this.url.host}/v2`, {});
+    const res = await fetch(`${this.url.protocol}//${this.url.host}/v2/`, {
+      headers: {
+        "User-Agent": "Docker-Client/24.0.5 (linux)",
+        "Accept-Encoding": "gzip",
+      },
+    });
+
+    if (res.ok) {
+      return {
+        authContext: {
+          authType: "none",
+          realm: "",
+          scope: "",
+          service: this.url.host,
+        },
+        repository: this.url.pathname,
+        accessToken: "",
+      };
+    }
+
     if (res.status !== 401) {
-      throw new Error(`registry ${this.url} answered with unexpected status code ${res.status}`);
+      throw new Error(`registry ${this.url.host}/v2 answered with unexpected status code ${res.status}`);
     }
 
     // see https://distribution.github.io/distribution/spec/auth/token/
@@ -150,6 +195,7 @@ export class RegistryHTTPClient implements Registry {
 
   async monolithicUpload(
     _namespace: string,
+    _expectedSha: string,
     _stream: ReadableStream<any>,
     _size: number,
   ): Promise<false | FinishedUploadObject | RegistryError> {
@@ -159,9 +205,12 @@ export class RegistryHTTPClient implements Registry {
 
   async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams): Promise<Response> {
     params.delete("password");
-    return await fetch(ctx.realm + params.toString(), {
+    console.log("sending authentication parameters:", ctx.realm + "?" + params.toString());
+    return await fetch(ctx.realm + "?" + params.toString(), {
       headers: {
-        Authorization: "Basic " + this.authBase64(),
+        "Authorization": "Basic " + this.authBase64(),
+        "Accept": "application/json",
+        "User-Agent": "Docker-Client/24.0.5 (linux)",
       },
     });
   }
@@ -170,52 +219,69 @@ export class RegistryHTTPClient implements Registry {
     const params = new URLSearchParams({
       service: ctx.service,
       // explicitely include that we don't want an offline_token.
-      scope: ctx.scope,
-      client_id: "cfr2registry",
+      scope: `repository:${this.url.pathname.slice(1)}/image:pull,push`,
+      client_id: "r2registry",
       grant_type: "password",
       password: this.password(),
     });
     let res = await fetch(ctx.realm, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Docker-Client/24.0.5 (linux)",
       },
+      method: "POST",
       body: params.toString(),
     });
-    if (res.status === 404) {
+    if (res.status === 404 || res.status === 405) {
       console.debug(
         this.url.toString(),
-        "Oauth 404... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
+        "Oauth 404/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
       );
       res = await this.authenticateBearerSimple(ctx, params);
     }
 
     if (!res.ok) {
-      throw new Error(`unexpected ${res.status} from ${this.url.toString()} when Oauth authenticating`);
-    }
-
-    const response: {
-      access_token: string;
-      expires_in: number;
-      repository: string;
-    } = await res.json();
-
-    console.debug(
-      `Authenticated with registry ${this.url.toString()} successfully, got token that expires in ${
-        response.expires_in
-      } seconds`,
-    );
-
-    if (!response.access_token) {
-      console.error(
-        "Oauth response doesn't have access_token field, doing fallback to password_env, however this might mean that we will 401 later",
+      throw new Error(
+        `unexpected ${res.status} from ${this.url.toString()} when Oauth authenticating: ${await res.text()}`,
       );
     }
 
-    return {
-      authContext: ctx,
-      repository: response.repository ?? "",
-      accessToken: response.access_token ?? this.authBase64(),
-    };
+    const t = await res.text();
+    try {
+      const response: {
+        access_token?: string;
+        expires_in: number;
+        repository: string;
+        token?: string;
+      } = JSON.parse(t);
+
+      console.debug(
+        `Authenticated with registry ${this.url.toString()} successfully, got token that expires in ${
+          response.expires_in
+        } seconds`,
+      );
+
+      if (!response.access_token && !response.token) {
+        console.error(
+          "Oauth response doesn't have access_token field, doing fallback to password_env, however this might mean that we will 401 later",
+        );
+      }
+
+      return {
+        authContext: ctx,
+        repository: response.repository ?? this.url.pathname,
+        accessToken: response.access_token ?? response.token ?? this.authBase64(),
+      };
+    } catch (err) {
+      console.error(
+        "Doing json response in authentication: ",
+        errorString(err),
+        t.slice(0, Math.min(t.length, 100)),
+        "status",
+        res.status,
+      );
+      throw err;
+    }
   }
 
   async authenticateBasic(ctx: AuthContext): Promise<HTTPContext> {
@@ -239,13 +305,17 @@ export class RegistryHTTPClient implements Registry {
   async manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
-      const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`));
+      const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
+      req.headers.append("Accept", manifestTypes.join(", "));
+      const res = await fetch(req);
       if (!res.ok && res.status !== 404) {
+        console.warn(req.url, "->", res.status, "getting manifest:", await res.text());
         return {
           response: res,
         };
       }
 
+      console.log("->", req.url, res.status);
       return {
         exists: res.ok,
         digest: res.headers.get("Docker-Content-Digest") as string,
@@ -263,7 +333,10 @@ export class RegistryHTTPClient implements Registry {
   async getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
-      const res = await fetch(ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`));
+      const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
+      req.headers.append("Accept", manifestTypes.join(", "));
+      const res = await fetch(req);
+      console.log(req.method, res.status, res.url);
       if (!res.ok) {
         return {
           response: res,
@@ -397,4 +470,4 @@ export class RegistryHTTPClient implements Registry {
 }
 
 // AuthType defined the supported auth types
-type AuthType = "basic" | "bearer";
+type AuthType = "basic" | "bearer" | "none";

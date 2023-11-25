@@ -36,7 +36,7 @@ router.all("/v2/*", v2Router.handle);
 router.all("*", () => new Response("Not Found.", { status: 404 }));
 
 export default {
-  async fetch(request: Request, env: Env) {
+  async fetch(request: Request, env: Env, context: ExecutionContext) {
     if (!ensureConfig(env)) {
       return new AuthErrorResponse(request);
     }
@@ -55,7 +55,7 @@ export default {
     env.REGISTRY_CLIENT = new R2Registry(env);
     try {
       // Dispatch the request to the appropriate route
-      const res = await router.handle(request, env);
+      const res = await router.handle(request, env, context);
       return res;
     } catch (err) {
       if (err instanceof Response) {

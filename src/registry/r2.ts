@@ -531,11 +531,28 @@ export class R2Registry implements Registry {
     return true;
   }
 
-  monolithicUpload(
+  async monolithicUpload(
     namespace: string,
+    sha256: string,
     stream: ReadableStream,
-    size: number,
+    size?: number,
   ): Promise<FinishedUploadObject | RegistryError | false> {
-    throw new Error("Method not implemented.");
+    if (!size) {
+      const blob = await readableToBlob(stream.getReader());
+      stream = blob.stream();
+      size = blob.size;
+    }
+
+    if (size > MAXIMUM_CHUNK) {
+      return false;
+    }
+
+    await this.env.REGISTRY.put(`${namespace}/blobs/${sha256}`, stream, {
+      sha256: (sha256 as string).slice(SHA256_PREFIX_LEN),
+    });
+    return {
+      digest: sha256,
+      location: `/v2/${namespace}/blobs/${sha256}`,
+    };
   }
 }

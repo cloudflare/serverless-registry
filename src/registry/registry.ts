@@ -132,8 +132,10 @@ export interface Registry {
   // support it and the caller should try to fallback to chunked upload
   monolithicUpload(
     namespace: string,
+    expectedSha: string,
     stream: ReadableStream,
-    size: number,
+    // For a more optimal upload
+    size?: number,
   ): Promise<FinishedUploadObject | RegistryError | false>;
 
   // uploads a chunk
