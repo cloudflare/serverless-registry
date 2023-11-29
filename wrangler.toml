@@ -36,7 +36,7 @@ kv_namespaces = [
     { binding = "UPLOADS", id = "abcd" }
 ]
 [env.dev.vars]
-REGISTRIES_JSON = "[{ \"registry\": \"localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
+REGISTRIES_JSON = "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
 JWT_STATE_SECRET = "HELLO"
 USERNAME="hello"
 PASSWORD="world"

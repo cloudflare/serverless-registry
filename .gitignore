@@ -1,3 +1,4 @@
 .wrangler
 *.env
 node_modules
+*.vars

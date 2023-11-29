@@ -1,4 +1,5 @@
 import { Env } from "../..";
+import { InternalError } from "../errors";
 import { errorString } from "../utils";
 import z from "zod";
 
@@ -25,9 +26,141 @@ export function registries(env: Env): RegistryConfiguration[] {
   }
 }
 
-// RegistryHTTPClient implements a registry client that is able to pull/push to the configured registry
-export class RegistryHTTPClient {
-  constructor(private env: Env, private configuration: RegistryConfiguration) {}
+// Registry error contains an HTTP response that is returned by the underlying registry implementation
+export type RegistryError = {
+  response: Response;
+};
 
-  // todo: implementation
+// Response of manifestExists call
+export type CheckManifestResponse =
+  | {
+      exists: true;
+      size: number;
+      digest: string;
+      contentType: string;
+    }
+  | {
+      exists: false;
+    };
+
+// Response layerExists call
+export type CheckLayerResponse =
+  | {
+      exists: true;
+      size: number;
+      digest: string;
+    }
+  | {
+      exists: false;
+    };
+
+// represents an upload transaction id
+export type UploadId = string;
+
+// upload object to use to continue an upload
+export type UploadObject = {
+  id: UploadId;
+  location: string;
+  // inclusive content range
+  range: [number, number];
+
+  minimumBytesPerChunk?: number;
+  maximumBytesPerChunk?: number;
+};
+
+// response when you finish an upload
+export type FinishedUploadObject = {
+  digest: string;
+  location: string;
+};
+
+// returned by getManifest when it successfully retrieves a manifest
+export type GetManifestResponse = {
+  stream: ReadableStream;
+  digest: string;
+  size: number;
+  contentType: string;
+};
+
+// returned by getLayer when it successfully retrieves a layer
+export type GetLayerResponse = {
+  stream: ReadableStream;
+  digest: string;
+  size: number;
+};
+
+// returned by putManifest when it successfully uploads a manifest
+export type PutManifestResponse = {
+  digest: string;
+  location: string;
+};
+
+// Registry interface to an implementation
+export interface Registry {
+  // All read operations supported by a registry
+
+  // checks whether the manifest exists in the registry
+  manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError>;
+
+  // gets the manifest by namespace + digest
+  getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError>;
+
+  // checks that a layer exists
+  layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError>;
+
+  // get a layer stream from the registry
+  getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError>;
+
+  // put manifest uploads a manifest into the registry
+  putManifest(
+    namespace: string,
+    reference: string,
+    readableStream: ReadableStream<any>,
+    contentType: string,
+  ): Promise<PutManifestResponse | RegistryError>;
+
+  // starts a new upload
+  startUpload(namespace: string): Promise<UploadObject | RegistryError>;
+
+  // cancels an upload
+  cancelUpload(namespace: string, uploadId: UploadId): Promise<true | RegistryError>;
+
+  // gets an existing upload
+  getUpload(namespace: string, uploadId: UploadId): Promise<UploadObject | RegistryError>;
+
+  // does a monolithic upload. if it returns false it means that the registry doesn't
+  // support it and the caller should try to fallback to chunked upload
+  monolithicUpload(
+    namespace: string,
+    expectedSha: string,
+    stream: ReadableStream,
+    // For a more optimal upload
+    size?: number,
+  ): Promise<FinishedUploadObject | RegistryError | false>;
+
+  // uploads a chunk
+  uploadChunk(
+    namespace: string,
+    location: string,
+    stream: ReadableStream,
+    // for a more optimal upload. Some clients might require it
+    length?: number,
+    range?: [number, number] | undefined,
+  ): Promise<UploadObject | RegistryError>;
+
+  // finishes an upload
+  finishUpload(
+    namespace: string,
+    location: string,
+    expectedDigest: string,
+    stream?: ReadableStream,
+    length?: number,
+  ): Promise<FinishedUploadObject | RegistryError>;
+}
+
+export function wrapError(method: string, err: unknown): RegistryError {
+  console.error(method, "error:", errorString(err));
+  return {
+    response: new InternalError(),
+  };
 }

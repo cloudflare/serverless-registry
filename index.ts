@@ -6,6 +6,8 @@ import { Router } from "itty-router";
 import { AuthErrorResponse, InternalError } from "./src/errors";
 import v2Router from "./src/router";
 import { authenticationMethodFromEnv } from "./src/authentication-method";
+import { Registry } from "./src/registry/registry";
+import { R2Registry } from "./src/registry/r2";
 
 // A full compatibility mode means that the r2 registry will try its best to
 // help the client on the layer push. See how we let the client push layers with chunked uploads for more information.
@@ -21,6 +23,7 @@ export interface Env {
   UPLOADS: KVNamespace;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
+  REGISTRY_CLIENT: Registry;
 }
 
 const router = Router();
@@ -33,7 +36,7 @@ router.all("/v2/*", v2Router.handle);
 router.all("*", () => new Response("Not Found.", { status: 404 }));
 
 export default {
-  async fetch(request: Request, env: Env) {
+  async fetch(request: Request, env: Env, context: ExecutionContext) {
     if (!ensureConfig(env)) {
       return new AuthErrorResponse(request);
     }
@@ -49,9 +52,10 @@ export default {
       return new AuthErrorResponse(request);
     }
 
+    env.REGISTRY_CLIENT = new R2Registry(env);
     try {
       // Dispatch the request to the appropriate route
-      const res = await router.handle(request, env);
+      const res = await router.handle(request, env, context);
       return res;
     } catch (err) {
       if (err instanceof Response) {
