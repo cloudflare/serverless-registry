@@ -4,7 +4,6 @@ workers_dev = true
 main = "./index.ts"
 compatibility_date = "2022-04-18"
 compatibility_flags = ["streams_enable_constructors"]
-logpush = true
 
 ## Production
 [env.production]
