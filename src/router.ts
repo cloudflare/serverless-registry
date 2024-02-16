@@ -173,7 +173,6 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
     }
 
     getManifestResponse = response;
-    console.log("Res:", res.response.status);
     if (res.response.status !== 404) {
       // Don't upload the manifest if there is an error
       break;
