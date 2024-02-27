@@ -270,7 +270,7 @@ test("registries configuration", async () => {
       configuration: "bla bla bla no json",
       expected: [],
       error:
-        "Error parsing registries JSON: error SyntaxError: Unexpected token b in JSON at position 0: undefined: SyntaxError: Unexpected token b in JSON at position 0\n",
+        "Error parsing registries JSON: error SyntaxError: Unexpected token 'b', \"bla bla bla no json\" is not valid JSON: undefined: SyntaxError: Unexpected token 'b', \"bla bla bla no json\" is not valid JSON\n",
       partialError: true,
     },
     {
