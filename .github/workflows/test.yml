@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    name: Unit Tests
+    name: Build and Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,4 +21,6 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
       - run: npm test
