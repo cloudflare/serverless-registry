@@ -27,6 +27,14 @@
   "engines": {
     "node": ">=16.13"
   },
+  "resolutions": {
+    "@types/node": "18.15.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/node": "18.15.3"
+    }
+  },
   "author": "",
   "license": "Apache-2.0"
 }

@@ -429,42 +429,42 @@ export class RegistryHTTPClient implements Registry {
   }
 
   putManifest(
-    namespace: string,
-    reference: string,
-    readableStream: ReadableStream<any>,
-    contentType: string,
+    _namespace: string,
+    _reference: string,
+    _readableStream: ReadableStream<any>,
+    _contentType: string,
   ): Promise<PutManifestResponse | RegistryError> {
     throw new Error("unimplemented");
   }
 
-  startUpload(namespace: string): Promise<UploadObject | RegistryError> {
+  startUpload(_namespace: string): Promise<UploadObject | RegistryError> {
     throw new Error("unimplemented");
   }
 
-  cancelUpload(namespace: string, uploadId: UploadId): Promise<true | RegistryError> {
+  cancelUpload(_namespace: string, _uploadId: UploadId): Promise<true | RegistryError> {
     throw new Error("unimplemented");
   }
 
-  getUpload(namespace: string, uploadId: string): Promise<UploadObject | RegistryError> {
+  getUpload(_namespace: string, _uploadId: string): Promise<UploadObject | RegistryError> {
     throw new Error("unimplemented");
   }
 
   async uploadChunk(
-    namespace: string,
-    location: string,
-    stream: ReadableStream<any>,
-    length?: number | undefined,
-    range?: [number, number] | undefined,
+    _namespace: string,
+    _location: string,
+    _stream: ReadableStream<any>,
+    _length?: number | undefined,
+    _range?: [number, number] | undefined,
   ): Promise<RegistryError | UploadObject> {
     throw new Error("unimplemented");
   }
 
   finishUpload(
-    namespace: string,
-    location: string,
-    expectedSha: string,
-    stream?: ReadableStream<any> | undefined,
-    length?: number | undefined,
+    _namespace: string,
+    _location: string,
+    _expectedSha: string,
+    _stream?: ReadableStream<any> | undefined,
+    _length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
     throw new Error("unimplemented");
   }
