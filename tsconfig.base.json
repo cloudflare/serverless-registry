@@ -1,30 +1,25 @@
 {
-	"compilerOptions": {
-		"target": "esnext",
-		"lib": [
-			"esnext"
-		],
-		"experimentalDecorators": true,
-		"module": "esnext",
-		"moduleResolution": "node",
-		"types": [
-			"@cloudflare/workers-types",
-			"vitest-environment-miniflare/globals"
-		],
-		"resolveJsonModule": true,
-		"allowJs": true,
-		"noEmit": true,
-		"isolatedModules": true,
-		"allowSyntheticDefaultImports": true,
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"strictNullChecks": true,
-		"noImplicitThis": true,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"noImplicitReturns": true,
-		"noFallthroughCasesInSwitch": true,
-		"skipLibCheck": true,
-		"noImplicitOverride": true,
-	}
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext"],
+    "experimentalDecorators": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "types": ["@cloudflare/workers-types", "vitest-environment-miniflare/globals"],
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noImplicitOverride": true
+  }
 }
