@@ -19,6 +19,7 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  ListRepositoriesResponse,
   PutManifestResponse,
   Registry,
   RegistryError,
@@ -128,6 +129,33 @@ export class R2Registry implements Registry {
     };
 
     return checkManifestResponse;
+  }
+
+  async listRepositories(limit?: number): Promise<RegistryError | ListRepositoriesResponse> {
+    const env = this.env;
+    const options = {
+      limit: limit ? limit : 1000,
+      delimiter: "/"
+    }
+    const r2Objects = (await env.REGISTRY.list(options));
+
+    let truncated = r2Objects.truncated;
+    let cursor = truncated ? r2Objects.cursor : undefined;
+
+    while (truncated) {
+      const next = await env.REGISTRY.list({
+        ...options,
+        cursor: cursor,
+      });
+      r2Objects.objects.push(...next.objects);
+    
+      truncated = next.truncated;
+      cursor = next.cursor
+    }
+
+    return {
+      repositories: r2Objects.delimitedPrefixes.map((name)=> name.replaceAll('/',""))
+    };
   }
 
   async putManifest(
