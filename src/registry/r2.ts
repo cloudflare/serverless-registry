@@ -154,7 +154,7 @@ export class R2Registry implements Registry {
     }
 
     return {
-      repositories: r2Objects.delimitedPrefixes.map((name)=> name.replaceAll('/',""))
+      repositories: r2Objects.delimitedPrefixes.map((name)=> name.endsWith('/') ? name.slice(0, -1) : name)
     };
   }
 
