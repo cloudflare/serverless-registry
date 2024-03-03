@@ -26,8 +26,11 @@ v2Router.get("/", async (_req, _env: Env) => {
 });
 
 v2Router.get("/_catalog", async (req, env: Env) => {
-  const { n } = req.query;
-  const res = await env.REGISTRY_CLIENT.listRepositories(parseInt(String(n)));
+  const { n, last } = req.query;
+  const res = await env.REGISTRY_CLIENT.listRepositories(
+    n ? parseInt(n?.toString()) : undefined,
+    last?.toString()
+  );
 
   return new Response(JSON.stringify(res));
 });

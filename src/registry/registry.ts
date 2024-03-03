@@ -109,7 +109,7 @@ export interface Registry {
   manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError>;
 
   // listing repositories in the registry
-  listRepositories(limit?: number): Promise<ListRepositoriesResponse | RegistryError>;
+  listRepositories(limit?: number, last?: string): Promise<ListRepositoriesResponse | RegistryError>;
 
   // gets the manifest by namespace + digest
   getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError>;

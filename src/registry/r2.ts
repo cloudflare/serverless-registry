@@ -131,11 +131,12 @@ export class R2Registry implements Registry {
     return checkManifestResponse;
   }
 
-  async listRepositories(limit?: number): Promise<RegistryError | ListRepositoriesResponse> {
+  async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     const env = this.env;
-    const options = {
+    const options:R2ListOptions = {
       limit: limit ? limit : 1000,
-      delimiter: "/"
+      delimiter: "/",
+      startAfter: last,
     }
     const r2Objects = (await env.REGISTRY.list(options));
 
