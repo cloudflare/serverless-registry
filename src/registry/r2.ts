@@ -145,30 +145,28 @@ export class R2Registry implements Registry {
     shaWriter.close();
     const digest = await sha256.digest;
     const digestStr = hexToDigest(digest);
-    const [arr1, arr2] = reference === digestStr ? [blob.stream(), blob.stream()] : blob.stream().tee();
+    const text = await blob.text();
     const putReference = async () => {
       // if the reference is the same as a digest, it's not necessary to insert
       if (reference === digestStr) return;
       // TODO: If we're overriding an existing manifest here, should we update the original manifest references?
-      return await env.REGISTRY.put(`${name}/manifests/${reference}`, arr1, {
+      return await env.REGISTRY.put(`${name}/manifests/${reference}`, text, {
         sha256: digest,
         httpMetadata: {
           contentType,
         },
       });
     };
-
-    await Promise.all([
+    await Promise.allSettled([
       putReference(),
       // this is the "main" manifest
-      env.REGISTRY.put(`${name}/manifests/${digestStr}`, arr2, {
+      env.REGISTRY.put(`${name}/manifests/${digestStr}`, text, {
         sha256: digest,
         httpMetadata: {
           contentType,
         },
       }),
     ]);
-
     return {
       digest: hexToDigest(digest),
       location: `/v2/${name}/manifests/${reference}`,
