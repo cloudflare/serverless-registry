@@ -133,7 +133,7 @@ export class R2Registry implements Registry {
 
   async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     const env = this.env;
-    const options:R2ListOptions = {
+    const options = {
       limit: limit ? limit : 1000,
       delimiter: "/",
       startAfter: last,
