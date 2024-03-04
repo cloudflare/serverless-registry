@@ -7,6 +7,7 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  ListRepositoriesResponse,
   PutManifestResponse,
   Registry,
   RegistryConfiguration,
@@ -465,6 +466,10 @@ export class RegistryHTTPClient implements Registry {
     _stream?: ReadableStream<any> | undefined,
     _length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
+    throw new Error("unimplemented");
+  }
+
+  async listRepositories(_limit?: number, _last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     throw new Error("unimplemented");
   }
 }

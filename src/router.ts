@@ -27,14 +27,17 @@ v2Router.get("/", async (_req, _env: Env) => {
 
 v2Router.get("/_catalog", async (req, env: Env) => {
   const { n, last } = req.query;
-  const res = await env.REGISTRY_CLIENT.listRepositories(
-    n ? parseInt(n?.toString()) : undefined,
-    last?.toString()
-  );
+  const res = await env.REGISTRY_CLIENT.listRepositories(n ? parseInt(n?.toString()) : undefined, last?.toString());
+  if ("response" in res) {
+    return res.response;
+  }
 
-  return new Response(JSON.stringify(res));
+  return new Response(JSON.stringify(res), {
+    headers: {
+      Link: `${req.url}/?last=${res.cursor ?? ""}; rel=next`,
+    },
+  });
 });
-
 
 v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   // deleting a manifest works by retrieving the """main""" manifest that its key is a sha,
@@ -49,17 +52,17 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   //
   // If somehow we need to remove by paginating, we accept a last query param
 
-  const { last } = req.query;
+  const { last, limit } = req.query;
   const { name, reference } = req.params;
   // Reference is ALWAYS a sha256
   const manifest = await env.REGISTRY.head(`${name}/manifests/${reference}`);
   if (manifest === null) {
     return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
   }
-
+  const limitInt = parseInt(limit?.toString() ?? "1000", 10);
   const tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
-    limit: 1000,
+    limit: isNaN(limitInt) ? 1000 : limitInt,
     startAfter: last?.toString(),
   });
   for (const tag of tags.objects) {
@@ -76,7 +79,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
     return new Response(JSON.stringify(ManifestTagsListTooBigError), {
       status: 400,
       headers: {
-        "Link": `${req.url}/last=${tags.objects[tags.objects.length - 1]}; rel=next`,
+        "Link": `${req.url}/?last=${tags.truncated ? tags.cursor : ""}; rel=next`,
         "Content-Type": "application/json",
       },
     });
