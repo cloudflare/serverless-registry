@@ -25,6 +25,17 @@ v2Router.get("/", async (_req, _env: Env) => {
   return new Response();
 });
 
+v2Router.get("/_catalog", async (req, env: Env) => {
+  const { n, last } = req.query;
+  const res = await env.REGISTRY_CLIENT.listRepositories(
+    n ? parseInt(n?.toString()) : undefined,
+    last?.toString()
+  );
+
+  return new Response(JSON.stringify(res));
+});
+
+
 v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   // deleting a manifest works by retrieving the """main""" manifest that its key is a sha,
   // and then going through every tag and removing it
