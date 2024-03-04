@@ -1,6 +1,6 @@
 import { Env } from "..";
 import { InternalError } from "./errors";
-import { Chunk } from "./router";
+import { Chunk } from "./registry/r2";
 
 // 5MiB
 export const MINIMUM_CHUNK = 1024 * 1024 * 5;

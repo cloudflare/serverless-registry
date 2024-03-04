@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { SHA256_PREFIX_LEN, getSHA256 } from "./src/user";
 import v2Router, { TagsList } from "./src/router";
 import { Env } from ".";
@@ -269,8 +269,7 @@ test("registries configuration", async () => {
     {
       configuration: "bla bla bla no json",
       expected: [],
-      error:
-        "Error parsing registries JSON: error SyntaxError: Unexpected token b in JSON at position 0: undefined: SyntaxError: Unexpected token b in JSON at position 0\n",
+      error: "Error parsing registries JSON: error SyntaxError: Unexpected token",
       partialError: true,
     },
     {

@@ -1,11 +1,5 @@
 {
-    "extends": "./tsconfig.base.json",
-    "include": [
-		  "src/**/*.ts",
-      "*.ts"
-    ],
-    "exclude": [
-        "src/**/*.js",
-        "dist/**/*.ts",
-    ],
+  "extends": "./tsconfig.base.json",
+  "include": ["src/**/*.ts", "*.ts"],
+  "exclude": ["src/**/*.js", "dist/**/*.ts"]
 }

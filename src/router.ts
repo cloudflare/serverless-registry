@@ -81,7 +81,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   });
 });
 
-v2Router.head("/:name+/manifests/:reference", async (req, env: Env, context: ExecutionContext) => {
+v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
   const { name, reference } = req.params;
   const res = await env.REGISTRY_CLIENT.manifestExists(name, reference);
   if ("exists" in res && res.exists) {
