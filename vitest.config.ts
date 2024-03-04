@@ -10,8 +10,5 @@ export default defineConfig({
       r2Buckets: ["REGISTRY"],
       kvNamespaces: ["UPLOADS"],
     },
-    // ? https://github.com/vitest-dev/vitest/issues/2008
-    // @ts-ignore
-    threads: false,
   },
 });
