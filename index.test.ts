@@ -112,6 +112,7 @@ describe("v2 manifests", () => {
       "content-type": "application/gzip",
       "docker-content-digest": sha256,
     });
+    await bindings.REGISTRY.delete(`${name}/manifests/${reference}`);
   });
 
   test("PUT /v2/:name/manifests/:reference works", () => createManifest("hello-world-main", "{}", "hello"));
@@ -369,5 +370,50 @@ describe("http client", () => {
     }
 
     expect("exists" in res && res.exists).toBe(false);
+  });
+});
+
+describe("push and catalog", () => {
+  test("push and then use the catalog", async () => {
+    await createManifest("hello-world-main", "{}", "hello");
+    await createManifest("hello-world-main", "{}", "latest");
+    await createManifest("hello-world-main", "{}", "hello-2");
+    await createManifest("hello", "{}", "hello");
+    await createManifest("hello/hello", "{}", "hello");
+
+    const response = await fetchUnauth(createRequest("GET", "/v2/_catalog", null));
+    expect(response.ok).toBeTruthy();
+    const body = (await response.json()) as { repositories: string[] };
+    expect(body).toEqual({
+      repositories: ["hello-world-main", "hello/hello", "hello"],
+    });
+    const expectedRepositories = body.repositories;
+    const tagsRes = await fetchUnauth(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
+    const tags = (await tagsRes.json()) as TagsList;
+    expect(tags.name).toEqual("hello-world-main");
+    expect(tags.tags).toEqual([
+      "hello",
+      "hello-2",
+      "latest",
+      "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    ]);
+
+    const repositoryBuildUp: string[] = [];
+    let currentPath = "/v2/_catalog?n=1";
+    for (let i = 0; i < 3; i++) {
+      const response = await fetchUnauth(createRequest("GET", currentPath, null));
+      expect(response.ok).toBeTruthy();
+      const body = (await response.json()) as { repositories: string[] };
+      if (body.repositories.length === 0) {
+        break;
+      }
+      expect(body.repositories).toHaveLength(1);
+
+      repositoryBuildUp.push(...body.repositories);
+      const url = new URL(response.headers.get("Link")!.split(";")[0].trim());
+      currentPath = url.pathname + url.search;
+    }
+
+    expect(repositoryBuildUp).toEqual(expectedRepositories);
   });
 });

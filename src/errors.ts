@@ -24,14 +24,28 @@ export class AuthErrorResponse extends Response {
 
 export class RangeError extends Response {
   constructor(stateStr: string, state: State) {
-    super("{}", {
-      status: 416,
-      headers: {
-        "Location": `/v2/${state.name}/blobs/uploads/${state.registryUploadId}?_state=${stateStr}`,
-        "Range": `0-${state.byteRange - 1}`,
-        "Docker-Upload-UUID": state.registryUploadId,
+    super(
+      JSON.stringify({
+        errors: [
+          {
+            code: "RANGE_ERROR",
+            message: `state ${stateStr} is not satisfiable (upload id: ${state.registryUploadId})`,
+            detail: {
+              ...state,
+              string: stateStr,
+            },
+          },
+        ],
+      }),
+      {
+        status: 416,
+        headers: {
+          "Location": `/v2/${state.name}/blobs/uploads/${state.registryUploadId}?_state=${stateStr}`,
+          "Range": `0-${state.byteRange - 1}`,
+          "Docker-Upload-UUID": state.registryUploadId,
+        },
       },
-    });
+    );
   }
 }
 

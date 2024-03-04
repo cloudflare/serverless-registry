@@ -132,30 +132,97 @@ export class R2Registry implements Registry {
   }
 
   async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
-    const env = this.env;
+    // The idea in listRepositories is list all entries in the R2 bucket and map them to repositories.
+    // We do this by taking advantage of the name format in the R2 bucket:
+    // name format is:
+    //   <path>/<'blobs' | 'manifests'>/<name>
+    // This means we slice the last two items in the key and add them to our hash map.
+    // At the end, we start skipping entries until we find another unique key, then we return that entry as startAfter.
+
     const options = {
-      limit: limit ? limit : 1000,
-      delimiter: "/",
-      startAfter: last,
-    }
-    const r2Objects = (await env.REGISTRY.list(options));
+      limit: limit ?? 1000,
+      startAfter: last ?? undefined,
+    };
+    const repositories: Record<string, {}> = {};
+    let totalRecords = 0;
+    let lastSeen: string | undefined;
+    const objectExistsInPath = (entry: string) => {
+      const parts = entry.split("/");
+      const repository = parts.slice(0, parts.length - 2).join("/");
+      return repository in repositories;
+    };
 
-    let truncated = r2Objects.truncated;
-    let cursor = truncated ? r2Objects.cursor : undefined;
+    const addObjectPath = (object: R2Object) => {
+      // update lastSeen for cursoring purposes
+      lastSeen = object.key;
+      // don't add if seen before
+      if (totalRecords >= options.limit) return;
+      // skip either 'manifests' or 'blobs'
+      // name format is:
+      // <path>/<'blobs' | 'manifests'>/<name>
+      const parts = object.key.split("/");
+      const repository = parts.slice(0, parts.length - 2).join("/");
+      if (!(repository in repositories)) {
+        totalRecords++;
+      }
 
-    while (truncated) {
-      const next = await env.REGISTRY.list({
-        ...options,
-        cursor: cursor,
+      repositories[repository] = {};
+    };
+
+    const r2Objects = await this.env.REGISTRY.list({
+      limit: options.limit,
+      startAfter: options.startAfter,
+    });
+    r2Objects.objects.forEach((path) => addObjectPath(path));
+    let cursor = r2Objects.truncated ? r2Objects.cursor : undefined;
+    while (cursor !== undefined && totalRecords < options.limit) {
+      const next = await this.env.REGISTRY.list({
+        limit: options.limit,
+        cursor,
       });
-      r2Objects.objects.push(...next.objects);
-    
-      truncated = next.truncated;
-      cursor = next.cursor
+      next.objects.forEach((path) => addObjectPath(path));
+      if (next.truncated) {
+        cursor = next.cursor;
+      } else {
+        cursor = undefined;
+      }
+    }
+
+    while (cursor !== undefined && typeof lastSeen === "string" && objectExistsInPath(lastSeen)) {
+      const nextList: R2Objects = await this.env.REGISTRY.list({
+        limit: 1000,
+        cursor,
+      });
+
+      let found = false;
+      // Search for the next object in the list
+      for (const object of nextList.objects) {
+        lastSeen = object.key;
+        if (!objectExistsInPath(lastSeen)) {
+          found = true;
+          break;
+        }
+      }
+
+      if (found) break;
+
+      if (nextList.truncated) {
+        // jump to the next list and try to find a
+        // repository that hasn't been returned in this response
+        cursor = nextList.cursor;
+      } else {
+        // we arrived to the end of the list, no more cursor
+        cursor = undefined;
+      }
+    }
+
+    if (cursor === undefined) {
+      lastSeen = undefined;
     }
 
     return {
-      repositories: r2Objects.delimitedPrefixes.map((name)=> name.endsWith('/') ? name.slice(0, -1) : name)
+      repositories: Object.keys(repositories),
+      cursor: lastSeen,
     };
   }
 
