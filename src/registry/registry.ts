@@ -43,11 +43,10 @@ export type CheckManifestResponse =
       exists: false;
     };
 
-export type ListRepositoriesResponse =
-  {
-    repositories: string[];
-  }
-
+export type ListRepositoriesResponse = {
+  repositories: string[];
+  cursor?: string;
+};
 
 // Response layerExists call
 export type CheckLayerResponse =

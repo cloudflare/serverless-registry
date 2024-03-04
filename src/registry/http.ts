@@ -7,6 +7,7 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  ListRepositoriesResponse,
   PutManifestResponse,
   Registry,
   RegistryConfiguration,
@@ -64,7 +65,6 @@ function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string
   const urlReq = `${url.protocol}//${ctx.authContext.service}/v2${
     ctx.repository === "" ? "/" : ctx.repository + "/"
   }${path}`;
-  console.log("Doing request:", urlReq);
   return new Request(urlReq, {
     method,
     body,
@@ -465,6 +465,10 @@ export class RegistryHTTPClient implements Registry {
     _stream?: ReadableStream<any> | undefined,
     _length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
+    throw new Error("unimplemented");
+  }
+
+  async listRepositories(_limit?: number, _last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     throw new Error("unimplemented");
   }
 }
