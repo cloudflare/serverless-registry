@@ -10,19 +10,19 @@
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules vitest run"
   },
   "dependencies": {
-    "@tsndr/cloudflare-worker-jwt": "^2.2.1",
-    "itty-router": "^4.0.9",
+    "@tsndr/cloudflare-worker-jwt": "^2.5.1",
+    "itty-router": "^4.0.27",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20231002.0",
+    "@cloudflare/workers-types": "^4.20240222.0",
     "cross-env": "^7.0.3",
-    "eslint": "^8.38.0",
-    "miniflare": "3.20230918.0",
-    "typescript": "^4.9.5",
-    "vitest": "^0.31.4",
-    "vitest-environment-miniflare": "^2.14.1",
-    "wrangler": "^3.19.0"
+    "eslint": "^8.57.0",
+    "miniflare": "3.20240208.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.3.1",
+    "vitest-environment-miniflare": "^2.14.2",
+    "wrangler": "^3.29.0"
   },
   "engines": {
     "node": ">=16.13"
