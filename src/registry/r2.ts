@@ -65,17 +65,33 @@ export type State = {
   name: string;
 };
 
+export function getRegistryUploadsPath(state: { registryUploadId: string; name: string }): string {
+  return `${state.name}/uploads/${state.registryUploadId}`;
+}
+
+export async function getJWT(env: Env, state: { registryUploadId: string; name: string }): Promise<string | null> {
+  const stateObject = await env.REGISTRY.get(getRegistryUploadsPath(state));
+  if (stateObject === null) return null;
+  const metadata = stateObject.customMetadata;
+  if (!metadata) return null;
+  if (!metadata.jwt || typeof metadata.jwt !== "string") {
+    return null;
+  }
+
+  return metadata.jwt;
+}
+
 export async function encodeState(state: State, env: Env): Promise<string> {
-  // 20 min timeout
+  // 2h timeout
   const jwtSignature = await jwt.sign(
-    { ...state, exp: Math.floor(Date.now() / 1000) + 60 * 20 },
+    { ...state, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2 },
     env.JWT_STATE_SECRET,
     {
       algorithm: "HS256",
     },
   );
-  // 15min of expiration
-  await env.UPLOADS.put(state.registryUploadId, jwtSignature);
+
+  await env.REGISTRY.put(getRegistryUploadsPath(state), "", { customMetadata: { jwt: jwtSignature } });
   return jwtSignature;
 }
 
@@ -91,7 +107,7 @@ export async function decodeStateString(
 
   const stateObject = jwt.decode(state).payload as unknown as State;
   if (!skipKVVerification) {
-    const lastState = await env.UPLOADS.get(stateObject.registryUploadId);
+    const lastState = await getJWT(env, stateObject);
     if (lastState !== null && lastState !== state) {
       const s = await decodeStateString(lastState, env);
       if (s instanceof RangeError) return s;
@@ -351,7 +367,7 @@ export class R2Registry implements Registry {
   }
 
   async getUpload(namespace: string, uploadId: string): Promise<UploadObject | RegistryError> {
-    const stateStr = await this.env.UPLOADS.get(uploadId);
+    const stateStr = await getJWT(this.env, { registryUploadId: uploadId, name: namespace });
     if (stateStr === null) {
       return {
         response: new Response(null, { status: 404 }),
@@ -601,6 +617,7 @@ export class R2Registry implements Registry {
 
       await put;
       await this.env.REGISTRY.delete(uuid);
+      await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
     }
 
     return {
@@ -609,8 +626,8 @@ export class R2Registry implements Registry {
     };
   }
 
-  async cancelUpload(_namespace: string, uploadId: UploadId): Promise<true | RegistryError> {
-    const lastState = await this.env.UPLOADS.get(uploadId);
+  async cancelUpload(name: string, uploadId: UploadId): Promise<true | RegistryError> {
+    const lastState = await getJWT(this.env, { name, registryUploadId: uploadId });
     if (!lastState) {
       return { response: new InternalError() };
     }

@@ -89,13 +89,6 @@ const ensureConfig = (env: Env): boolean => {
     return false;
   }
 
-  if (!env.UPLOADS) {
-    console.error(
-      "env.UPLOADS is not setup. Please setup a KV namespace and add the binding in wrangler.toml. Try 'wrangler --env production kv:namespace create r2_registry_uploads'",
-    );
-    return false;
-  }
-
   if (!env.JWT_STATE_SECRET) {
     console.error(
       `env.JWT_STATE_SECRET is not set. Please setup this secret using wrnagler. Try 'echo \`node -e "console.log(crypto.randomUUID())"\` | wrangler --env production secret put JWT_STATE_SECRET'`,
