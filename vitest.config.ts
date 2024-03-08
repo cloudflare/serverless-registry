@@ -8,7 +8,6 @@ export default defineConfig({
     // API options here:
     environmentOptions: {
       r2Buckets: ["REGISTRY"],
-      kvNamespaces: ["UPLOADS"],
     },
   },
 });

@@ -20,7 +20,6 @@ export interface Env {
   USERNAME?: string;
   PASSWORD?: string;
   JWT_STATE_SECRET: string;
-  UPLOADS: KVNamespace;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
