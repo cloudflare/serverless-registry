@@ -1,3 +1,4 @@
+import { decode } from "@cfworker/base64url";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 import {
   RegistryTokenCapability,
@@ -8,11 +9,7 @@ import {
 
 export function importKeyFromBase64(key: string): JsonWebKey {
   // Decodes the base64 value and performs unicode normalization.
-  // @see https://datatracker.ietf.org/doc/html/rfc7613#section-3.3.2 (and #section-4.2.2)
-  // @see https://dev.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String/normalize
-  const buffer = Uint8Array.from(atob(key), (character) => character.charCodeAt(0));
-  const decoded = new TextDecoder().decode(buffer).normalize();
-  return JSON.parse(decoded);
+  return JSON.parse(decode(key));
 }
 
 export async function newRegistryTokens(jwtPublicKey: string): Promise<RegistryTokens> {
