@@ -20,7 +20,6 @@ export interface Env {
   USERNAME?: string;
   PASSWORD?: string;
   JWT_STATE_SECRET: string;
-  UPLOADS: KVNamespace;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
@@ -85,13 +84,6 @@ const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
     console.error(
       "env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'wrangler --env production r2 bucket create r2-registry'",
-    );
-    return false;
-  }
-
-  if (!env.UPLOADS) {
-    console.error(
-      "env.UPLOADS is not setup. Please setup a KV namespace and add the binding in wrangler.toml. Try 'wrangler --env production kv:namespace create r2_registry_uploads'",
     );
     return false;
   }
