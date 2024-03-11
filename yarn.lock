@@ -7,6 +7,13 @@
   resolved "https://registry.npmjs.org/@aashutoshrathi/word-wrap/-/word-wrap-1.2.6.tgz"
   integrity sha512-1Yjs2SvM8TflER/OD3cOjhWWOZb58A2t7wpE2S9XfBYTiIl+XFhQG2bjy4Pu1I+EAlCNUzRDYDdFwFYUKvXcIA==
 
+"@cfworker/base64url@^1.12.5":
+  version "1.12.5"
+  resolved "https://registry.npmjs.org/@cfworker/base64url/-/base64url-1.12.5.tgz"
+  integrity sha512-pNLrz0D0MguzFLJisBUv+XOTkpRpRTIMI7/r2QwTWI2MR5VJ7Hysd6ug6DBWksKFy7TK3hCf+qejufdJSN5X+A==
+  dependencies:
+    rfc4648 "^1.5.2"
+
 "@cloudflare/kv-asset-handler@0.3.1":
   version "0.3.1"
   resolved "https://registry.npmjs.org/@cloudflare/kv-asset-handler/-/kv-asset-handler-0.3.1.tgz"
@@ -1487,6 +1494,11 @@ reusify@^1.0.4:
   version "1.0.4"
   resolved "https://registry.npmjs.org/reusify/-/reusify-1.0.4.tgz"
   integrity sha512-U9nH88a3fc/ekCF1l0/UP1IosiuIjyTh7hBvXVMHYgVcfGvt897Xguj2UOLDeI5BG2m7/uwyaLVT6fbtCwTyzw==
+
+rfc4648@^1.5.2:
+  version "1.5.3"
+  resolved "https://registry.npmjs.org/rfc4648/-/rfc4648-1.5.3.tgz"
+  integrity sha512-MjOWxM065+WswwnmNONOT+bD1nXzY9Km6u3kzvnx8F8/HXGZdz3T6e6vZJ8Q/RIMUSp/nxqjH3GwvJDy8ijeQQ==
 
 rimraf@^3.0.2:
   version "3.0.2"
