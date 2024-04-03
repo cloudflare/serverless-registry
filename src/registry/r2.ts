@@ -72,13 +72,17 @@ export function getRegistryUploadsPath(state: { registryUploadId: string; name: 
 export async function getJWT(env: Env, state: { registryUploadId: string; name: string }): Promise<string | null> {
   const stateObject = await env.REGISTRY.get(getRegistryUploadsPath(state));
   if (stateObject === null) return null;
-  const metadata = stateObject.customMetadata;
-  if (!metadata) return null;
-  if (!metadata.jwt || typeof metadata.jwt !== "string") {
+  try {
+    const metadata = await stateObject.json<{jwt?: string}>();
+    if (!metadata) return null;
+    if (!metadata.jwt || typeof metadata.jwt !== "string") {
+      return null;
+    }
+    return metadata.jwt;
+  } catch (e) {
+    console.error("Error parsing metadata", e);
     return null;
   }
-
-  return metadata.jwt;
 }
 
 export async function encodeState(state: State, env: Env): Promise<string> {
@@ -91,7 +95,7 @@ export async function encodeState(state: State, env: Env): Promise<string> {
     },
   );
 
-  await env.REGISTRY.put(getRegistryUploadsPath(state), "", { customMetadata: { jwt: jwtSignature } });
+  await env.REGISTRY.put(getRegistryUploadsPath(state), JSON.stringify({ jwt: jwtSignature }));
   return jwtSignature;
 }
 
