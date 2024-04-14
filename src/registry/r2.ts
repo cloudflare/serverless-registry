@@ -610,7 +610,6 @@ export class R2Registry implements Registry {
       await this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, stream, {
         sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
       });
-      await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
     } else {
       const upload = this.env.REGISTRY.resumeMultipartUpload(uuid, state.uploadId);
       // TODO: Handle one last buffer here
@@ -622,9 +621,10 @@ export class R2Registry implements Registry {
 
       await put;
       await this.env.REGISTRY.delete(uuid);
-      await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
     }
-
+    
+    await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
+    
     return {
       digest: expectedSha,
       location: `/v2/${namespace}/blobs/${expectedSha}`,
