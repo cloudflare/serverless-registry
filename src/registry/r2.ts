@@ -282,6 +282,7 @@ export class R2Registry implements Registry {
           contentType,
         },
       }),
+      this.scheduleGarbageCollection(name),
     ]);
     return {
       digest: hexToDigest(digest),
@@ -622,9 +623,10 @@ export class R2Registry implements Registry {
       await put;
       await this.env.REGISTRY.delete(uuid);
     }
-    
+
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
-    
+    await this.scheduleGarbageCollection(namespace);
+
     return {
       digest: expectedSha,
       location: `/v2/${namespace}/blobs/${expectedSha}`,
@@ -644,6 +646,7 @@ export class R2Registry implements Registry {
 
     const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
     await upload.abort();
+    await this.scheduleGarbageCollection(name);
     return true;
   }
 
@@ -666,9 +669,21 @@ export class R2Registry implements Registry {
     await this.env.REGISTRY.put(`${namespace}/blobs/${sha256}`, stream, {
       sha256: (sha256 as string).slice(SHA256_PREFIX_LEN),
     });
+    await this.scheduleGarbageCollection(namespace);
     return {
       digest: sha256,
       location: `/v2/${namespace}/blobs/${sha256}`,
     };
   }
+
+  async scheduleGarbageCollection(namespace: string): Promise<void> {
+    if (this.env.GARBAGE_COLLECTOR_MODE !== "unreferenced" && this.env.GARBAGE_COLLECTOR_MODE !== "untagged") {
+      return;
+    }
+
+    const gc = this.env.GARBAGE_COLLECTOR.get(this.env.GARBAGE_COLLECTOR.idFromName("gc-" + namespace));
+    await gc.schedule(namespace, this.env.GARBAGE_COLLECTOR_MODE);
+    return;
+  }
+
 }

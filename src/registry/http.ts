@@ -471,6 +471,11 @@ export class RegistryHTTPClient implements Registry {
   async listRepositories(_limit?: number, _last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     throw new Error("unimplemented");
   }
+
+  async scheduleGarbageCollection(_namespace: string): Promise<void> {
+    throw new Error("unimplemented");
+  }
+
 }
 
 // AuthType defined the supported auth types

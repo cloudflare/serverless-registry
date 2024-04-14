@@ -164,6 +164,9 @@ export interface Registry {
     stream?: ReadableStream,
     length?: number,
   ): Promise<FinishedUploadObject | RegistryError>;
+
+  // Schedule a garbage collection for the given namespace
+  scheduleGarbageCollection(namespace: string): Promise<void>;
 }
 
 export function wrapError(method: string, err: unknown): RegistryError {

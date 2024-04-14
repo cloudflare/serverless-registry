@@ -8,6 +8,8 @@ import v2Router from "./src/router";
 import { authenticationMethodFromEnv } from "./src/authentication-method";
 import { Registry } from "./src/registry/registry";
 import { R2Registry } from "./src/registry/r2";
+import { GARBAGE_COLLECTOR_MODE, GarbageCollector } from "./src/registry/garbage-collector";
+export { GarbageCollector }
 
 // A full compatibility mode means that the r2 registry will try its best to
 // help the client on the layer push. See how we let the client push layers with chunked uploads for more information.
@@ -23,6 +25,8 @@ export interface Env {
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
+  GARBAGE_COLLECTOR_MODE: GARBAGE_COLLECTOR_MODE;
+  GARBAGE_COLLECTOR: DurableObjectNamespace<GarbageCollector>;
 }
 
 const router = Router();
@@ -97,3 +101,4 @@ const ensureConfig = (env: Env): boolean => {
 
   return true;
 };
+
