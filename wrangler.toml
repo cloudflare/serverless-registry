@@ -4,10 +4,6 @@ workers_dev = true
 main = "./index.ts"
 compatibility_date = "2024-04-03"
 
-[[migrations]]
-tag = "v1"
-new_classes = ["GarbageCollector"]
-
 ## Production
 [env.production]
 r2_buckets = [
