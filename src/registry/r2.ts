@@ -1,4 +1,4 @@
-import { Env } from "../..";
+import { Env, GarbageCollector } from "../..";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 import {
   MINIMUM_CHUNK,
@@ -27,6 +27,7 @@ import {
   UploadObject,
   wrapError,
 } from "./registry";
+import { GARBAGE_COLLECTOR_MODE } from "./garbage-collector";
 
 export type Chunk =
   | {
@@ -680,10 +681,14 @@ export class R2Registry implements Registry {
     if (this.env.GARBAGE_COLLECTOR_MODE !== "unreferenced" && this.env.GARBAGE_COLLECTOR_MODE !== "untagged") {
       return;
     }
-
     const gc = this.env.GARBAGE_COLLECTOR.get(this.env.GARBAGE_COLLECTOR.idFromName("gc-" + namespace));
     await gc.schedule(namespace, this.env.GARBAGE_COLLECTOR_MODE);
-    return;
   }
 
+  async collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
+    const gc = this.env.GARBAGE_COLLECTOR.get(this.env.GARBAGE_COLLECTOR.idFromName("gc-" + namespace));
+    const result = gc.collect({ name: namespace, mode: mode }, true);
+    context.waitUntil(result);
+    return await result;
+  }
 }

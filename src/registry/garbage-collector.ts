@@ -1,58 +1,72 @@
 import { DurableObject } from "cloudflare:workers";
 import { Env } from "../..";
+import { ServerError } from "../errors";
 
 // We have 2 modes for the garbage collector, unreferenced and untagged.
 // Unreferenced will delete all blobs that are not referenced by any manifest.
 // Untagged will delete all blobs that are not referenced by any manifest and are not tagged.
 
 export type GARBAGE_COLLECTOR_MODE = "unreferenced" | "untagged";
+export type GCOptions = {
+  name: string;
+  mode: GARBAGE_COLLECTOR_MODE;
+};
 
 export class GarbageCollector extends DurableObject<Env> {
+  static DELAY = 30 * 60 * 1000;
+  static LAST_UPDATE_THRESHOLD = 10 * 60 * 1000;
 
   async schedule(name:string, mode: GARBAGE_COLLECTOR_MODE): Promise<void> {
-    this.ctx.storage.put("name", name);
-    this.ctx.storage.put("mode", mode);
-    await this.ctx.storage.setAlarm(Date.now() + 600 * 1000);
+    const options: GCOptions = { name, mode };
+    await this.ctx.storage.put("options", options);
+    await this.ctx.storage.setAlarm(Date.now() + GarbageCollector.DELAY);
   }
 
   override async alarm(): Promise<void> {
     this.ctx.waitUntil(this.collect());
   }
 
-  private async list(prefix: string, callback: (object: R2Object) => Promise<void>): Promise<void>{
+  private async list(prefix: string, callback: (object: R2Object) => Promise<boolean>): Promise<boolean>{
     const listed = await this.env.REGISTRY.list({ prefix });
     for (const object of listed.objects) {
-      await callback(object);
+      if ((await callback(object)) === false) {
+        return false;
+      }
     }
     let truncated = listed.truncated;
     let cursor = listed.cursor;
     while (truncated) {
       const next = await this.env.REGISTRY.list({ prefix, cursor });
       for (const object of next.objects) {
-        await callback(object);
+        if ((await callback(object)) === false) {
+          return false;
+        }
       }
       truncated = next.truncated;
       cursor = next.cursor;
     }
+    return true;
   }
 
-  async collect(): Promise<void> {
-    const name = await this.ctx.storage.get<string>("name");
-    const mode = await this.ctx.storage.get<GARBAGE_COLLECTOR_MODE>("mode");
-    if (!name || !mode) {
-      return;
+  async collect(options?: GCOptions, force: boolean = false): Promise<boolean> {
+    const cutOffDate = Date.now() - GarbageCollector.LAST_UPDATE_THRESHOLD;
+    options = options || await this.ctx.storage.get<GCOptions>("options");
+    if (!options) {
+      throw new ServerError("No options found for garbage collector", 500);
     }
     let referencedBlobs = new Set<string>(); // We can run out of memory, this should be a bloom filter
 
-    await this.list(`${name}/manifests/`, async (manifestObject) => {
+    let result = await this.list(`${options.name}/manifests/`, async (manifestObject) => {
       const tag = manifestObject.key.split("/").pop();
-      if ((!tag) || (mode === "untagged" && tag.startsWith("sha256:"))) {
-        return;
+      if ((!tag) || (options.mode === "untagged" && tag.startsWith("sha256:"))) {
+        return true;
       }
-
+      if (!force && manifestObject.uploaded.getTime() > cutOffDate) {
+        return false;
+      }
       const manifest = await this.env.REGISTRY.get(manifestObject.key);
       if (!manifest) {
-        return;
+        return true;
       }
 
       const manifestData = await manifest.text();
@@ -62,10 +76,17 @@ export class GarbageCollector extends DurableObject<Env> {
       while ((match = layerRegex.exec(manifestData)) !== null) {
         referencedBlobs.add( match[0] );
       }
+      return true;
     });
+    if (!result) {
+      return false;
+    }
 
     let unreferencedKeys: string[] = [];
-    await this.list(`${name}/blobs/`, async (object) => {
+    result = await this.list(`${options.name}/blobs/`, async (object) => {
+      if (!force && object.uploaded.getTime() > cutOffDate) {
+        return false;
+      }
       const hash = object.key.split("/").pop();
       if (hash && !referencedBlobs.has(hash)) {
         unreferencedKeys.push(object.key);
@@ -74,12 +95,16 @@ export class GarbageCollector extends DurableObject<Env> {
           unreferencedKeys = [];
         }
       }
+      return true;
     });
-    console.log(`Deleting ${unreferencedKeys.length} unreferenced blobs`);
+    if (!result) {
+      return false;
+    }
     if (unreferencedKeys.length > 0) {
       await this.env.REGISTRY.delete(unreferencedKeys);
     }
 
     await this.ctx.storage.deleteAll();
+    return true;
   }
 }

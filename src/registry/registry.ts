@@ -1,7 +1,8 @@
-import { Env } from "../..";
+import { Env, GarbageCollector } from "../..";
 import { InternalError } from "../errors";
 import { errorString } from "../utils";
 import z from "zod";
+import { GARBAGE_COLLECTOR_MODE } from "./garbage-collector";
 
 // Defines a registry and how it's configured
 const registryConfiguration = z.object({
@@ -167,6 +168,7 @@ export interface Registry {
 
   // Schedule a garbage collection for the given namespace
   scheduleGarbageCollection(namespace: string): Promise<void>;
+  collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean>;
 }
 
 export function wrapError(method: string, err: unknown): RegistryError {

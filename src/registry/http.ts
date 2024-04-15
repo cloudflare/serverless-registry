@@ -476,6 +476,9 @@ export class RegistryHTTPClient implements Registry {
     throw new Error("unimplemented");
   }
 
+  collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
+    throw new Error("unimplemented");
+  }
 }
 
 // AuthType defined the supported auth types
