@@ -98,8 +98,6 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   // Last but not least, delete the digest manifest
   await env.REGISTRY.delete(`${name}/manifests/${reference}`);
   
-  await env.REGISTRY_CLIENT.scheduleGarbageCollection(name);
-
   return new Response("", {
     status: 202,
     headers: {

@@ -1,4 +1,4 @@
-import { Env, GarbageCollector } from "../..";
+import { Env } from "../..";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 import {
   MINIMUM_CHUNK,
@@ -27,7 +27,7 @@ import {
   UploadObject,
   wrapError,
 } from "./registry";
-import { GARBAGE_COLLECTOR_MODE } from "./garbage-collector";
+import { GARBAGE_COLLECTOR_MODE, GarbageCollector } from "./garbage-collector";
 
 export type Chunk =
   | {
@@ -283,7 +283,6 @@ export class R2Registry implements Registry {
           contentType,
         },
       }),
-      this.scheduleGarbageCollection(name),
     ]);
     return {
       digest: hexToDigest(digest),
@@ -626,7 +625,6 @@ export class R2Registry implements Registry {
     }
 
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
-    await this.scheduleGarbageCollection(namespace);
 
     return {
       digest: expectedSha,
@@ -647,7 +645,6 @@ export class R2Registry implements Registry {
 
     const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
     await upload.abort();
-    await this.scheduleGarbageCollection(name);
     return true;
   }
 
@@ -670,24 +667,15 @@ export class R2Registry implements Registry {
     await this.env.REGISTRY.put(`${namespace}/blobs/${sha256}`, stream, {
       sha256: (sha256 as string).slice(SHA256_PREFIX_LEN),
     });
-    await this.scheduleGarbageCollection(namespace);
     return {
       digest: sha256,
       location: `/v2/${namespace}/blobs/${sha256}`,
     };
   }
 
-  async scheduleGarbageCollection(namespace: string): Promise<void> {
-    if (this.env.GARBAGE_COLLECTOR_MODE !== "unreferenced" && this.env.GARBAGE_COLLECTOR_MODE !== "untagged") {
-      return;
-    }
-    const gc = this.env.GARBAGE_COLLECTOR.get(this.env.GARBAGE_COLLECTOR.idFromName("gc-" + namespace));
-    await gc.schedule(namespace, this.env.GARBAGE_COLLECTOR_MODE);
-  }
-
   async collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
-    const gc = this.env.GARBAGE_COLLECTOR.get(this.env.GARBAGE_COLLECTOR.idFromName("gc-" + namespace));
-    const result = gc.collect({ name: namespace, mode: mode }, true);
+    const gc = new GarbageCollector(this.env.REGISTRY);
+    const result = gc.collect({ name: namespace, mode: mode });
     context.waitUntil(result);
     return await result;
   }

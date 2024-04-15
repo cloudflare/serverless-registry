@@ -16,11 +16,6 @@ r2_buckets = [
 
 [env.production.vars]
 JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
-# GARBAGE_COLLECTOR_MODE = "unreferenced"
-[env.production.durable_objects]
-bindings = [
-    { name = "GARBAGE_COLLECTOR", class_name = "GarbageCollector" }
-]
 
 # Secrets:
 # JWT_STATE_SECRET
@@ -34,7 +29,6 @@ bindings = [
 [env.dev]
 r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
 [env.dev.vars]
-GARBAGE_COLLECTOR_MODE = "untagged"
 # REGISTRIES_JSON = "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
 JWT_STATE_SECRET = "HELLO"
 USERNAME = "hello"
@@ -42,7 +36,3 @@ PASSWORD = "world"
 # The necessary secrets are:
 # Setup those secrets on .dev.vars in the root of the project
 #
-[env.dev.durable_objects]
-bindings = [
-    { name = "GARBAGE_COLLECTOR", class_name = "GarbageCollector" }
-]

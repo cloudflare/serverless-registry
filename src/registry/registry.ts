@@ -166,8 +166,6 @@ export interface Registry {
     length?: number,
   ): Promise<FinishedUploadObject | RegistryError>;
 
-  // Schedule a garbage collection for the given namespace
-  scheduleGarbageCollection(namespace: string): Promise<void>;
   collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean>;
 }
 
