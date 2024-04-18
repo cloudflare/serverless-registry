@@ -3,10 +3,10 @@ import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePass
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
 
-export function hexToDigest(sha256: ArrayBuffer) {
+export function hexToDigest(sha256: ArrayBuffer, prefix: string = SHA256_PREFIX+':') {
   const digest = [...new Uint8Array(sha256)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-  return `${SHA256_PREFIX}:${digest}`;
+  return `${prefix}${digest}`;
 }
 
 function stringToArrayBuffer(s: string): ArrayBuffer {
@@ -15,14 +15,14 @@ function stringToArrayBuffer(s: string): ArrayBuffer {
   return arr;
 }
 
-export async function getSHA256(data: string): Promise<string> {
+export async function getSHA256(data: string, prefix: string = SHA256_PREFIX+':'): Promise<string> {
   const sha256 = new crypto.DigestStream("SHA-256");
   const w = sha256.getWriter();
   const encoder = new TextEncoder();
   const arr = encoder.encode(data);
   w.write(arr);
   w.close();
-  return hexToDigest(await sha256.digest);
+  return hexToDigest(await sha256.digest, prefix);
 }
 
 export class UserAuthenticator implements Authenticator {

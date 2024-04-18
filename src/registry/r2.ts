@@ -96,7 +96,7 @@ export async function encodeState(state: State, env: Env): Promise<{jwt: string,
   );
 
   await env.REGISTRY.put(getRegistryUploadsPath(state), JSON.stringify({ jwt: jwtSignature }));
-  return {jwt: jwtSignature, hash: await getSHA256(jwtSignature)};
+  return {jwt: jwtSignature, hash: await getSHA256(jwtSignature, "")};
 }
 
 export async function getUploadState(name: string, uploadId: string, env: Env, verifyHash: string | undefined): Promise<{state: State, stateStr: string, hash: string} | RangeError | null> {
@@ -104,7 +104,7 @@ export async function getUploadState(name: string, uploadId: string, env: Env, v
   if (stateStr === null) {
     return null;
   }
-  const stateStrHash = await getSHA256(stateStr);
+  const stateStrHash = await getSHA256(stateStr, "");
   
   const ok = await jwt.verify(stateStr, env.JWT_STATE_SECRET, { algorithm: "HS256" }); // Ivan: We don't really need jwt anymore (currently it only checks for 2 hrs expiration)
   if (!ok) {

@@ -384,7 +384,7 @@ v2Router.get("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 });
 
 v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
-  const { name } = req.params;
+  const { name, uuid } = req.params;
   const contentRange = req.headers.get("Content-Range");
   const [start, end] = contentRange?.split("-") ?? [undefined, undefined];
   if (req.body == null) {
@@ -403,6 +403,7 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   const [res, err] = await wrap<UploadObject | RegistryError, Error>(
     env.REGISTRY_CLIENT.uploadChunk(
       name,
+      uuid,
       url.pathname + "?" + url.searchParams.toString(),
       stream,
       +contentLengthString,
@@ -431,13 +432,14 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 });
 
 v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
-  const { name } = req.params;
+  const { name, uuid } = req.params;
   const { digest } = req.query;
 
   const url = new URL(req.url);
   const [res, err] = await wrap<FinishedUploadObject | RegistryError, Error>(
     env.REGISTRY_CLIENT.finishUpload(
       name,
+      uuid,
       url.pathname + "?" + url.searchParams.toString(),
       digest! as string,
       req.body ?? undefined,

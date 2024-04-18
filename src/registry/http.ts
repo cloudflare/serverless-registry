@@ -450,6 +450,7 @@ export class RegistryHTTPClient implements Registry {
 
   async uploadChunk(
     _namespace: string,
+    _uploadId: string,
     _location: string,
     _stream: ReadableStream<any>,
     _length?: number | undefined,
@@ -460,6 +461,7 @@ export class RegistryHTTPClient implements Registry {
 
   finishUpload(
     _namespace: string,
+    _uploadId: string,
     _location: string,
     _expectedSha: string,
     _stream?: ReadableStream<any> | undefined,
