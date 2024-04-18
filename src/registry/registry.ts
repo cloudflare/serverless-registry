@@ -149,6 +149,7 @@ export interface Registry {
   // uploads a chunk
   uploadChunk(
     namespace: string,
+    uploadId: string,
     location: string,
     stream: ReadableStream,
     // for a more optimal upload. Some clients might require it
@@ -159,6 +160,7 @@ export interface Registry {
   // finishes an upload
   finishUpload(
     namespace: string,
+    uploadId: string,
     location: string,
     expectedDigest: string,
     stream?: ReadableStream,

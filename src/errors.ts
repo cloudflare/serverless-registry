@@ -23,16 +23,16 @@ export class AuthErrorResponse extends Response {
 }
 
 export class RangeError extends Response {
-  constructor(stateStr: string, state: State) {
+  constructor(stateHash: string, state: State) {
     super(
       JSON.stringify({
         errors: [
           {
             code: "RANGE_ERROR",
-            message: `state ${stateStr} is not satisfiable (upload id: ${state.registryUploadId})`,
+            message: `stateHash ${stateHash} does not match state (upload id: ${state.registryUploadId})`,
             detail: {
               ...state,
-              string: stateStr,
+              string: stateHash,
             },
           },
         ],
@@ -40,7 +40,7 @@ export class RangeError extends Response {
       {
         status: 416,
         headers: {
-          "Location": `/v2/${state.name}/blobs/uploads/${state.registryUploadId}?_state=${stateStr}`,
+          "Location": `/v2/${state.name}/blobs/uploads/${state.registryUploadId}?_stateHash=${stateHash}`,
           "Range": `0-${state.byteRange - 1}`,
           "Docker-Upload-UUID": state.registryUploadId,
         },
