@@ -18,7 +18,6 @@ import {
   registries,
 } from "./registry/registry";
 import { RegistryHTTPClient } from "./registry/http";
-import { GARBAGE_COLLECTOR_MODE } from "./registry/garbage-collector";
 
 const v2Router = Router({ base: "/v2/" });
 
@@ -97,7 +96,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
 
   // Last but not least, delete the digest manifest
   await env.REGISTRY.delete(`${name}/manifests/${reference}`);
-  
+
   return new Response("", {
     status: 202,
     headers: {
@@ -567,8 +566,7 @@ v2Router.post("/:name+/collectgarbage", async (req, env: Env, context: Execution
     throw new ServerError("Mode must be either 'unreferenced' or 'untagged'", 400);
   }
   const result = await env.REGISTRY_CLIENT.collectGarbage(context, name, mode);
-  return new Response(JSON.stringify({ success:result }));
+  return new Response(JSON.stringify({ success: result }));
 });
-
 
 export default v2Router;

@@ -74,7 +74,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
   const stateObject = await env.REGISTRY.get(getRegistryUploadsPath(state));
   if (stateObject === null) return null;
   try {
-    const metadata = await stateObject.json<{jwt?: string}>();
+    const metadata = await stateObject.json<{ jwt?: string }>();
     if (!metadata) return null;
     if (!metadata.jwt || typeof metadata.jwt !== "string") {
       return null;

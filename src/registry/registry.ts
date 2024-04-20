@@ -1,4 +1,4 @@
-import { Env, GarbageCollector } from "../..";
+import { Env } from "../..";
 import { InternalError } from "../errors";
 import { errorString } from "../utils";
 import z from "zod";

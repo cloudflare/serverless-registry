@@ -15,7 +15,7 @@ export class GarbageCollector {
     this.registry = registry;
   }
 
-  private async list(prefix: string, callback: (object: R2Object) => Promise<boolean>): Promise<boolean>{
+  private async list(prefix: string, callback: (object: R2Object) => Promise<boolean>): Promise<boolean> {
     const listed = await this.registry.list({ prefix });
     for (const object of listed.objects) {
       if ((await callback(object)) === false) {
@@ -23,7 +23,8 @@ export class GarbageCollector {
       }
     }
     let truncated = listed.truncated;
-    let cursor = listed.cursor;
+    let cursor = listed.truncated ? listed.cursor : undefined;
+
     while (truncated) {
       const next = await this.registry.list({ prefix, cursor });
       for (const object of next.objects) {
@@ -32,7 +33,7 @@ export class GarbageCollector {
         }
       }
       truncated = next.truncated;
-      cursor = next.cursor;
+      cursor = truncated ? cursor : undefined;
     }
     return true;
   }
@@ -42,7 +43,7 @@ export class GarbageCollector {
 
     await this.list(`${options.name}/manifests/`, async (manifestObject) => {
       const tag = manifestObject.key.split("/").pop();
-      if ((!tag) || (options.mode === "untagged" && tag.startsWith("sha256:"))) {
+      if (!tag || (options.mode === "untagged" && tag.startsWith("sha256:"))) {
         return true;
       }
       const manifest = await this.registry.get(manifestObject.key);
@@ -51,11 +52,11 @@ export class GarbageCollector {
       }
 
       const manifestData = await manifest.text();
-      
+
       const layerRegex = /sha256:[a-f0-9]{64}/g;
       let match;
       while ((match = layerRegex.exec(manifestData)) !== null) {
-        referencedBlobs.add( match[0] );
+        referencedBlobs.add(match[0]);
       }
       return true;
     });
