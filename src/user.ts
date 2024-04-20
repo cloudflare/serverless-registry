@@ -3,7 +3,7 @@ import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePass
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
 
-export function hexToDigest(sha256: ArrayBuffer, prefix: string = SHA256_PREFIX+':') {
+export function hexToDigest(sha256: ArrayBuffer, prefix: string = SHA256_PREFIX + ":") {
   const digest = [...new Uint8Array(sha256)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
   return `${prefix}${digest}`;
@@ -15,7 +15,7 @@ function stringToArrayBuffer(s: string): ArrayBuffer {
   return arr;
 }
 
-export async function getSHA256(data: string, prefix: string = SHA256_PREFIX+':'): Promise<string> {
+export async function getSHA256(data: string, prefix: string = SHA256_PREFIX + ":"): Promise<string> {
   const sha256 = new crypto.DigestStream("SHA-256");
   const w = sha256.getWriter();
   const encoder = new TextEncoder();

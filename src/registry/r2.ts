@@ -73,7 +73,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
   const stateObject = await env.REGISTRY.get(getRegistryUploadsPath(state));
   if (stateObject === null) return null;
   try {
-    const metadata = await stateObject.json<{jwt?: string}>();
+    const metadata = await stateObject.json<{ jwt?: string }>();
     if (!metadata) return null;
     if (!metadata.jwt || typeof metadata.jwt !== "string") {
       return null;
@@ -85,7 +85,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
   }
 }
 
-export async function encodeState(state: State, env: Env): Promise<{jwt: string, hash: string}> {
+export async function encodeState(state: State, env: Env): Promise<{ jwt: string; hash: string }> {
   // 2h timeout
   const jwtSignature = await jwt.sign(
     { ...state, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2 },
@@ -96,16 +96,21 @@ export async function encodeState(state: State, env: Env): Promise<{jwt: string,
   );
 
   await env.REGISTRY.put(getRegistryUploadsPath(state), JSON.stringify({ jwt: jwtSignature }));
-  return {jwt: jwtSignature, hash: await getSHA256(jwtSignature, "")};
+  return { jwt: jwtSignature, hash: await getSHA256(jwtSignature, "") };
 }
 
-export async function getUploadState(name: string, uploadId: string, env: Env, verifyHash: string | undefined): Promise<{state: State, stateStr: string, hash: string} | RangeError | null> {
+export async function getUploadState(
+  name: string,
+  uploadId: string,
+  env: Env,
+  verifyHash: string | undefined,
+): Promise<{ state: State; stateStr: string; hash: string } | RangeError | null> {
   const stateStr = await getJWT(env, { registryUploadId: uploadId, name: name });
   if (stateStr === null) {
     return null;
   }
   const stateStrHash = await getSHA256(stateStr, "");
-  
+
   const ok = await jwt.verify(stateStr, env.JWT_STATE_SECRET, { algorithm: "HS256" }); // Ivan: We don't really need jwt anymore (currently it only checks for 2 hrs expiration)
   if (!ok) {
     throw new InternalError();
@@ -117,9 +122,8 @@ export async function getUploadState(name: string, uploadId: string, env: Env, v
   if (!verifyHash && stateStrHash !== verifyHash) {
     return new RangeError(stateStrHash, stateObject);
   }
-  return {state: stateObject, stateStr: stateStr, hash: stateStrHash};
+  return { state: stateObject, stateStr: stateStr, hash: stateStrHash };
 }
-
 
 export class R2Registry implements Registry {
   constructor(private env: Env) {}
