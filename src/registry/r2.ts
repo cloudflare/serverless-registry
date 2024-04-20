@@ -681,4 +681,11 @@ export class R2Registry implements Registry {
       location: `/v2/${namespace}/blobs/${sha256}`,
     };
   }
+
+  async collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
+    const gc = new GarbageCollector(this.env.REGISTRY);
+    const result = gc.collect({ name: namespace, mode: mode });
+    context.waitUntil(result);
+    return await result;
+  }
 }
