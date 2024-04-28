@@ -10,7 +10,7 @@ import {
   split,
 } from "../chunk";
 import { InternalError, RangeError, ServerError } from "../errors";
-import { SHA256_PREFIX_LEN, hexToDigest } from "../user";
+import { SHA256_PREFIX_LEN, getSHA256, hexToDigest } from "../user";
 import { readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
@@ -73,7 +73,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
   const stateObject = await env.REGISTRY.get(getRegistryUploadsPath(state));
   if (stateObject === null) return null;
   try {
-    const metadata = await stateObject.json<{jwt?: string}>();
+    const metadata = await stateObject.json<{ jwt?: string }>();
     if (!metadata) return null;
     if (!metadata.jwt || typeof metadata.jwt !== "string") {
       return null;
@@ -85,7 +85,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
   }
 }
 
-export async function encodeState(state: State, env: Env): Promise<string> {
+export async function encodeState(state: State, env: Env): Promise<{ jwt: string; hash: string }> {
   // 2h timeout
   const jwtSignature = await jwt.sign(
     { ...state, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2 },
@@ -96,30 +96,33 @@ export async function encodeState(state: State, env: Env): Promise<string> {
   );
 
   await env.REGISTRY.put(getRegistryUploadsPath(state), JSON.stringify({ jwt: jwtSignature }));
-  return jwtSignature;
+  return { jwt: jwtSignature, hash: await getSHA256(jwtSignature, "") };
 }
 
-export async function decodeStateString(
-  state: string,
+export async function getUploadState(
+  name: string,
+  uploadId: string,
   env: Env,
-  skipKVVerification = false,
-): Promise<State | RangeError> {
-  const ok = await jwt.verify(state, env.JWT_STATE_SECRET, { algorithm: "HS256" });
+  verifyHash: string | undefined,
+): Promise<{ state: State; stateStr: string; hash: string } | RangeError | null> {
+  const stateStr = await getJWT(env, { registryUploadId: uploadId, name: name });
+  if (stateStr === null) {
+    return null;
+  }
+  const stateStrHash = await getSHA256(stateStr, "");
+
+  const ok = await jwt.verify(stateStr, env.JWT_STATE_SECRET, { algorithm: "HS256" }); // Ivan: We don't really need jwt anymore (currently it only checks for 2 hrs expiration)
   if (!ok) {
     throw new InternalError();
   }
-
-  const stateObject = jwt.decode(state).payload as unknown as State;
-  if (!skipKVVerification) {
-    const lastState = await getJWT(env, stateObject);
-    if (lastState !== null && lastState !== state) {
-      const s = await decodeStateString(lastState, env);
-      if (s instanceof RangeError) return s;
-      return new RangeError(lastState, s);
-    }
+  const stateObject = jwt.decode<State>(stateStr).payload;
+  if (!stateObject) {
+    throw new InternalError();
   }
-
-  return stateObject;
+  if (!verifyHash && stateStrHash !== verifyHash) {
+    return new RangeError(stateStrHash, stateObject);
+  }
+  return { state: stateObject, stateStr: stateStr, hash: stateStrHash };
 }
 
 export class R2Registry implements Registry {
@@ -360,69 +363,69 @@ export class R2Registry implements Registry {
       name: namespace,
       chunks: [],
     };
-    const stateStr = await encodeState(state, this.env);
+    const hashedJwtState = await encodeState(state, this.env);
     return {
       maximumBytesPerChunk: MAXIMUM_CHUNK_UPLOAD_SIZE,
       minimumBytesPerChunk: MINIMUM_CHUNK,
       id: uuid,
-      location: `/v2/${namespace}/blobs/uploads/${uuid}?_state=${stateStr}`,
+      location: `/v2/${namespace}/blobs/uploads/${uuid}?_stateHash=${hashedJwtState.hash}`,
       range: [0, 0],
     };
   }
 
   async getUpload(namespace: string, uploadId: string): Promise<UploadObject | RegistryError> {
-    const stateStr = await getJWT(this.env, { registryUploadId: uploadId, name: namespace });
-    if (stateStr === null) {
+    const state = await getUploadState(namespace, uploadId, this.env, undefined);
+    if (state === null) {
       return {
         response: new Response(null, { status: 404 }),
       };
     }
-
-    const state = await decodeStateString(stateStr, this.env, true);
     // kind of unreachable, as RangeErrors are only thrown for invalid states
     if (state instanceof RangeError) {
       return { response: new InternalError() };
     }
 
     return {
-      id: state.registryUploadId,
+      id: uploadId,
       maximumBytesPerChunk: MAXIMUM_CHUNK_UPLOAD_SIZE,
       minimumBytesPerChunk: MINIMUM_CHUNK,
-      location: `/v2/${namespace}/blobs/uploads/${state.registryUploadId}?_state=${stateStr}`,
+      location: `/v2/${namespace}/blobs/uploads/${uploadId}?_stateHash=${state.hash}`,
       // Note that the HTTP Range header byte ranges are inclusive and that will be honored, even in non-standard use cases.
-      range: [0, state.byteRange - 1],
+      range: [0, state.state.byteRange - 1],
     };
   }
 
   async uploadChunk(
     namespace: string,
+    uploadId: string,
     location: string,
     stream: ReadableStream<any>,
     length?: number | undefined,
     range?: [number, number] | undefined,
   ): Promise<RegistryError | UploadObject> {
     const urlObject = new URL("https://r2-registry.com" + location);
-    const stateString = urlObject.searchParams.get("_state");
-    if (!stateString) {
-      console.error("No state string on", urlObject.toString());
-      return {
-        response: new InternalError(),
-      };
+    const stateHash = urlObject.searchParams.get("_stateHash");
+    if (stateHash === null) {
+      console.error("State hash is missing");
+      return { response: new InternalError() };
     }
 
-    const state = await decodeStateString(stateString, this.env);
-    if (state instanceof RangeError)
+    const hashedState = await getUploadState(namespace, uploadId, this.env, stateHash);
+    if (hashedState instanceof RangeError)
       return {
-        response: state,
+        response: hashedState,
       };
-
+    const state = hashedState?.state;
+    if (!state) {
+      return { response: new InternalError() };
+    }
     const [start, end] = range ?? [undefined, undefined];
     if (
       start !== undefined &&
       end !== undefined &&
       (state.byteRange !== +start || state.byteRange >= +end || +start >= +end)
     ) {
-      return { response: new RangeError(stateString, state) };
+      return { response: new RangeError(stateHash, state) };
     }
 
     if (state.parts.length >= 10000) {
@@ -546,7 +549,7 @@ export class R2Registry implements Registry {
         throw new ServerError("unreachable", 500);
       }
 
-      return new RangeError(stateString as string, state);
+      return new RangeError(stateHash, state);
     };
 
     if (length === undefined) {
@@ -563,33 +566,39 @@ export class R2Registry implements Registry {
         response: res,
       };
 
-    const stateStr = await encodeState(state, env);
+    const hashedJwtState = await encodeState(state, env);
     return {
       id: uuid,
       range: [0, state.byteRange - 1],
-      location: `/v2/${namespace}/blobs/uploads/${uuid}?_state=${stateStr}`,
+      location: `/v2/${namespace}/blobs/uploads/${uuid}?_stateHash=${hashedJwtState.hash}`,
     };
   }
 
   async finishUpload(
     namespace: string,
+    uploadId: string,
     location: string,
     expectedSha: string,
     stream?: ReadableStream<any> | undefined,
     length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
     const urlObject = new URL("https://r2-registry.com" + location);
-    const stateString = urlObject.searchParams.get("_state");
-    if (stateString === null) {
-      console.error("State string is empty");
+    const stateHash = urlObject.searchParams.get("_stateHash");
+    if (stateHash === null) {
+      console.error("State hash is missing");
       return { response: new InternalError() };
     }
 
-    const state = await decodeStateString(stateString, this.env);
-    if (state instanceof RangeError)
+    const hashedState = await getUploadState(namespace, uploadId, this.env, stateHash);
+    if (hashedState instanceof RangeError) {
       return {
-        response: state,
+        response: hashedState,
       };
+    }
+    if (hashedState === null || !hashedState.state) {
+      return { response: new InternalError() };
+    }
+    const state = hashedState.state;
 
     const uuid = state.registryUploadId;
     if (state.parts.length === 0) {
@@ -622,9 +631,9 @@ export class R2Registry implements Registry {
       await put;
       await this.env.REGISTRY.delete(uuid);
     }
-    
+
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
-    
+
     return {
       digest: expectedSha,
       location: `/v2/${namespace}/blobs/${expectedSha}`,
@@ -632,15 +641,14 @@ export class R2Registry implements Registry {
   }
 
   async cancelUpload(name: string, uploadId: UploadId): Promise<true | RegistryError> {
-    const lastState = await getJWT(this.env, { name, registryUploadId: uploadId });
-    if (!lastState) {
+    const hashedState = await getUploadState(name, uploadId, this.env, undefined);
+    if (hashedState instanceof RangeError) {
       return { response: new InternalError() };
     }
-
-    const state = await decodeStateString(lastState, this.env);
-    if (state instanceof RangeError) {
+    if (hashedState === null || !hashedState.state) {
       return { response: new InternalError() };
     }
+    const state = hashedState.state;
 
     const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
     await upload.abort();
