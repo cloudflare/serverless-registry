@@ -111,10 +111,6 @@ export async function getUploadState(
   }
   const stateStrHash = await getSHA256(stateStr, "");
 
-  const ok = await jwt.verify(stateStr, env.JWT_STATE_SECRET, { algorithm: "HS256" }); // Ivan: We don't really need jwt anymore (currently it only checks for 2 hrs expiration)
-  if (!ok) {
-    throw new InternalError();
-  }
   const stateObject = jwt.decode<State>(stateStr).payload;
   if (!stateObject) {
     throw new InternalError();
@@ -324,6 +320,20 @@ export class R2Registry implements Registry {
       };
     }
 
+    if (res.customMetadata && typeof res.customMetadata.path == "string") {
+      const [response, err] = await wrap(this.env.REGISTRY.get(res.customMetadata.path));
+      if (err) return wrapError("layerExists", err);
+      if (!response)
+        return {
+          exists: false,
+        };
+      return {
+        digest: tag,
+        exists: true,
+        size: response.size,
+      };
+    }
+
     return {
       digest: hexToDigest(res.checksums.sha256!),
       size: res.size,
@@ -343,9 +353,23 @@ export class R2Registry implements Registry {
       };
     }
 
+    if (res.customMetadata && typeof res.customMetadata.path == "string") {
+      const [response, err] = await wrap(this.env.REGISTRY.get(res.customMetadata.path));
+      if (err) return wrapError("getLayer", err);
+      if (!response)
+        return {
+          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+        };
+      return {
+        stream: response.body!,
+        digest,
+        size: response.size,
+      };
+    }
+
     return {
       stream: res.body!,
-      digest: hexToDigest(res.checksums.sha256!),
+      digest,
       size: res.size,
     };
   }
@@ -623,13 +647,10 @@ export class R2Registry implements Registry {
       const upload = this.env.REGISTRY.resumeMultipartUpload(uuid, state.uploadId);
       // TODO: Handle one last buffer here
       await upload.complete(state.parts);
-      const obj = await this.env.REGISTRY.get(uuid);
-      const put = this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, obj!.body, {
-        sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
+      const put = this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, null, {
+        customMetadata: { path: uuid, sha: expectedSha },
       });
-
       await put;
-      await this.env.REGISTRY.delete(uuid);
     }
 
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
