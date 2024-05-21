@@ -86,10 +86,10 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
 }
 
 export async function encodeState(state: State, env: Env): Promise<{ jwt: string; hash: string }> {
-  // 2h timeout
   const jwtSignature = await jwt.sign(
     { ...state, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2 },
-    env.JWT_STATE_SECRET,
+    // TODO: Remove JWT encoding and use something faster like just plain bas64
+    "secret-doesnt-matter-anymore-we-are-using-jwt-for-encoding-state",
     {
       algorithm: "HS256",
     },
@@ -109,19 +109,19 @@ export async function getUploadState(
   if (stateStr === null) {
     return null;
   }
-  const stateStrHash = await getSHA256(stateStr, "");
 
-  const ok = await jwt.verify(stateStr, env.JWT_STATE_SECRET, { algorithm: "HS256" }); // Ivan: We don't really need jwt anymore (currently it only checks for 2 hrs expiration)
-  if (!ok) {
-    throw new InternalError();
-  }
+  const stateStrHash = await getSHA256(stateStr, "");
+  // We are skipping state jwt verifying as it doesn't make sense anymore, we are already verifying it's the latest by looking into R2 and comparing the hash.
   const stateObject = jwt.decode<State>(stateStr).payload;
   if (!stateObject) {
+    console.error("Payload property is not in the JWT");
     throw new InternalError();
   }
+
   if (!verifyHash && stateStrHash !== verifyHash) {
     return new RangeError(stateStrHash, stateObject);
   }
+
   return { state: stateObject, stateStr: stateStr, hash: stateStrHash };
 }
 
@@ -415,10 +415,12 @@ export class R2Registry implements Registry {
       return {
         response: hashedState,
       };
+
     const state = hashedState?.state;
     if (!state) {
       return { response: new InternalError() };
     }
+
     const [start, end] = range ?? [undefined, undefined];
     if (
       start !== undefined &&

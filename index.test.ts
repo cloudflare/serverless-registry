@@ -26,7 +26,6 @@ function usernamePasswordToAuth(username: string, password: string): string {
 }
 
 const bindings = getMiniflareBindings() as Env;
-bindings.JWT_STATE_SECRET = "hello-world";
 async function fetchUnauth(r: Request): Promise<Response> {
   const res = await v2Router.handle(r, bindings);
   return res as Response;
@@ -354,7 +353,6 @@ describe("http client", () => {
 
   test("test manifest exists", async () => {
     envBindings = { ...bindings };
-    envBindings.JWT_STATE_SECRET = "hello";
     envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
     envBindings.PASSWORD = "123456";
     envBindings.USERNAME = "v1";

@@ -29,13 +29,7 @@ r2_buckets = [
 ]
 ```
 
-2. Setup the JWT_STATE_SECRET secret binding
-
-```bash
-$ node -p 'crypto.randomUUID()' | wrangler --env production secret put JWT_STATE_SECRET
-```
-
-3. Deploy your image registry
+2. Deploy your image registry
 
 ```bash
 $ wrangler deploy --env production

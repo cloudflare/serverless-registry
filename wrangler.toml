@@ -15,10 +15,6 @@ r2_buckets = [
 JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 
 # Secrets:
-# JWT_STATE_SECRET
-# echo `node -e "console.log(crypto.randomUUID())"` | wrangler secret put JWT_STATE_SECRET
-
-# Optional Secrets
 # USERNAME/PASSWORD if you want username/password based auth
 
 
@@ -27,7 +23,6 @@ JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
 [env.dev.vars]
 # REGISTRIES_JSON = "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
-JWT_STATE_SECRET = "HELLO"
 USERNAME = "hello"
 PASSWORD = "world"
 # The necessary secrets are:
