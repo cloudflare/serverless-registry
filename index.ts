@@ -19,7 +19,6 @@ export interface Env {
   JWT_REGISTRY_TOKENS_PUBLIC_KEY?: string;
   USERNAME?: string;
   PASSWORD?: string;
-  JWT_STATE_SECRET: string;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
@@ -84,13 +83,6 @@ const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
     console.error(
       "env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'wrangler --env production r2 bucket create r2-registry'",
-    );
-    return false;
-  }
-
-  if (!env.JWT_STATE_SECRET) {
-    console.error(
-      `env.JWT_STATE_SECRET is not set. Please setup this secret using wrnagler. Try 'echo \`node -e "console.log(crypto.randomUUID())"\` | wrangler --env production secret put JWT_STATE_SECRET'`,
     );
     return false;
   }
