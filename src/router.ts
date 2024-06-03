@@ -1,7 +1,7 @@
 import { Router } from "itty-router";
 import { BlobUnknownError, ManifestUnknownError } from "./v2-errors";
 import { InternalError, ServerError } from "./errors";
-import { errorString, wrap } from "./utils";
+import { errorString, jsonHeaders, wrap } from "./utils";
 import { hexToDigest } from "./user";
 import { ManifestTagsListTooBigError } from "./v2-responses";
 import { Env } from "..";
@@ -66,7 +66,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   // Reference is ALWAYS a sha256
   const manifest = await env.REGISTRY.head(`${name}/manifests/${reference}`);
   if (manifest === null) {
-    return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+    return new Response(JSON.stringify(ManifestUnknownError(reference)), { status: 404, headers: jsonHeaders() });
   }
   const limitInt = parseInt(limit?.toString() ?? "1000", 10);
   const tags = await env.REGISTRY.list({
@@ -162,7 +162,7 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
   }
 
   if (checkManifestResponse === null || !checkManifestResponse.exists)
-    return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+    return new Response(JSON.stringify(ManifestUnknownError(reference)), { status: 404, headers: jsonHeaders() });
 
   return new Response(null, {
     headers: {
@@ -221,7 +221,9 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
     break;
   }
 
-  if (getManifestResponse === null) return new Response(JSON.stringify(ManifestUnknownError), { status: 404 });
+  if (getManifestResponse === null)
+    return new Response(JSON.stringify(ManifestUnknownError(reference)), { status: 404, headers: jsonHeaders() });
+
   return new Response(getManifestResponse.stream, {
     headers: {
       "Content-Length": getManifestResponse.size.toString(),

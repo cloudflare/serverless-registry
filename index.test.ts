@@ -89,7 +89,9 @@ describe("v2 manifests", () => {
         {
           code: "MANIFEST_UNKNOWN",
           message: "manifest unknown",
-          detail: "This error is returned when the manifest, identified by name and tag is unknown to the repository.",
+          detail: {
+            Tag: "reference",
+          },
         },
       ],
     });
