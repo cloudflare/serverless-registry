@@ -96,6 +96,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
 
   // Last but not least, delete the digest manifest
   await env.REGISTRY.delete(`${name}/manifests/${reference}`);
+
   return new Response("", {
     status: 202,
     headers: {
@@ -560,6 +561,16 @@ v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
       "Content-Length": "None",
     },
   });
+});
+
+v2Router.post("/:name+/collectgarbage", async (req, env: Env, context: ExecutionContext) => {
+  const { name } = req.params;
+  const mode = req.query.mode ?? "unreferenced";
+  if (mode !== "unreferenced" && mode !== "untagged") {
+    throw new ServerError("Mode must be either 'unreferenced' or 'untagged'", 400);
+  }
+  const result = await env.REGISTRY_CLIENT.collectGarbage(context, name, mode);
+  return new Response(JSON.stringify({ success: result }));
 });
 
 export default v2Router;

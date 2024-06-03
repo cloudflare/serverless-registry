@@ -1,6 +1,7 @@
 import { Env } from "../..";
 import { InternalError } from "../errors";
 import { errorString } from "../utils";
+import { GARBAGE_COLLECTOR_MODE } from "./garbage-collector";
 import {
   CheckLayerResponse,
   CheckManifestResponse,
@@ -471,6 +472,10 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async listRepositories(_limit?: number, _last?: string): Promise<RegistryError | ListRepositoriesResponse> {
+    throw new Error("unimplemented");
+  }
+
+  collectGarbage(_context: ExecutionContext, _namespace: string, _mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
     throw new Error("unimplemented");
   }
 }

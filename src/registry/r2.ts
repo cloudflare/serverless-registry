@@ -27,6 +27,7 @@ import {
   UploadObject,
   wrapError,
 } from "./registry";
+import { GARBAGE_COLLECTOR_MODE, GarbageCollector } from "./garbage-collector";
 
 export type Chunk =
   | {
@@ -680,5 +681,12 @@ export class R2Registry implements Registry {
       digest: sha256,
       location: `/v2/${namespace}/blobs/${sha256}`,
     };
+  }
+
+  async collectGarbage(context: ExecutionContext, namespace: string, mode: GARBAGE_COLLECTOR_MODE): Promise<boolean> {
+    const gc = new GarbageCollector(this.env.REGISTRY);
+    const result = gc.collect({ name: namespace, mode: mode });
+    context.waitUntil(result);
+    return await result;
   }
 }

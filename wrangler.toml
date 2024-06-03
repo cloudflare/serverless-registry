@@ -2,8 +2,7 @@ name = "r2-registry"
 
 workers_dev = true
 main = "./index.ts"
-compatibility_date = "2022-04-18"
-compatibility_flags = ["streams_enable_constructors"]
+compatibility_date = "2024-04-03"
 
 ## Production
 [env.production]
