@@ -7,10 +7,10 @@ Username/Password and public key JWT based authentication.
 
 ### Deployment
 
-You have to install all the dependencies with your favorite package manager (e.g pnpm, npm, yarn, bun...).
+You have to install all the dependencies with [pnpm](https://pnpm.io/installation) (other package managers may work, but only pnpm is supported.)
 
 ```bash
-$ npm install
+$ pnpm install
 ```
 
 After installation, there is a few steps to actually deploy the registry into production:

@@ -26,7 +26,7 @@ $ docker tag my-image:local docker tag localhost:8787/my-image:local && docker p
 Test the registry with unit tests by running `vitest` with `miniflare 2`. 
 
 ```bash
-$ npm run test
+$ pnpm test
 ```
 
 ## Making a change
