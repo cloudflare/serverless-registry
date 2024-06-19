@@ -18,7 +18,7 @@ JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 # USERNAME/PASSWORD if you want username/password based auth
 
 
-## Dev - For local dev using `wrangler dev`
+## Dev - For local dev using `npx wrangler dev`
 [env.dev]
 r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
 [env.dev.vars]

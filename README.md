@@ -7,10 +7,10 @@ Username/Password and public key JWT based authentication.
 
 ### Deployment
 
-You have to install all the dependencies with your favorite package manager (e.g pnpm, npm, yarn, bun...).
+You have to install all the dependencies with [pnpm](https://pnpm.io/installation) (other package managers may work, but only pnpm is supported.)
 
 ```bash
-$ npm install
+$ pnpm install
 ```
 
 After installation, there is a few steps to actually deploy the registry into production:
@@ -18,7 +18,7 @@ After installation, there is a few steps to actually deploy the registry into pr
 1. Setup the R2 Bucket for this registry
 
 ```bash
-$ wrangler --env production r2 bucket create r2-registry
+$ npx wrangler --env production r2 bucket create r2-registry
 ```
 
 Add this to your `wrangler.toml`
@@ -32,19 +32,19 @@ r2_buckets = [
 2. Deploy your image registry
 
 ```bash
-$ wrangler deploy --env production
+$ npx wrangler deploy --env production
 ```
 
 Your registry should be up and running. It will refuse any requests if you don't setup credentials.
 
 ### Adding username password based authentication
 
-Set the USERNAME and PASSWORD as secrets with `wrangler secret put USERNAME --env production` and `wrangler secret put PASSWORD --env production`.
+Set the USERNAME and PASSWORD as secrets with `npx wrangler secret put USERNAME --env production` and `npx wrangler secret put PASSWORD --env production`.
 
 ### Adding JWT authentication with public key
 
 You can add a base64 encoded JWT public key to verify passwords (or token) that are signed by the private key.
-`wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY --env production`
+`npx wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY --env production`
 
 ### Known limitations
 
@@ -52,7 +52,7 @@ Right now there is some limitations with this docker registry.
 
 - Pushing with docker is limited to images that have layers of maximum size 500MB. Refer to maximum request body sizes in your Workers plan.
 - To circumvent that limitation, you can manually add the layer and the manifest into the R2 bucket or use a client that is able to chunk uploads in sizes less than 500MB (or the limit that you have in your Workers plan).
-- If you use `wrangler dev` and push to the R2 registry with docker, the R2 registry will have to buffer the request on the Worker.
+- If you use `npx wrangler dev` and push to the R2 registry with docker, the R2 registry will have to buffer the request on the Worker.
 
 ## License
 
