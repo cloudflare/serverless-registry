@@ -82,7 +82,7 @@ export default {
 const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
     console.error(
-      "env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'wrangler --env production r2 bucket create r2-registry'",
+      "env.REGISTRY is not setup. Please setup an R2 bucket and add the binding in wrangler.toml. Try 'npx wrangler --env production r2 bucket create r2-registry'",
     );
     return false;
   }

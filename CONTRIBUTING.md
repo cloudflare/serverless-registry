@@ -4,7 +4,7 @@
 Running the registry is done via `wrangler dev`
 
 ```bash
-$ wrangler --env dev dev
+$ npx wrangler --env dev dev
 ```
 
 You can `docker login` locally for running a push
