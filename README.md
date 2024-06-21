@@ -46,6 +46,64 @@ Set the USERNAME and PASSWORD as secrets with `npx wrangler secret put USERNAME 
 You can add a base64 encoded JWT public key to verify passwords (or token) that are signed by the private key.
 `npx wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY --env production`
 
+### Using with Docker
+
+You can use this registry with Docker to push and pull images.
+
+Example using `docker push` and `docker pull`:
+
+```bash
+export REGISTRY_URL=your-url-here
+
+# Replace $PASSWORD and $USERNAME with the actual credentials
+echo $PASSWORD | docker login --username $USERNAME --password-stdin $REGISTRY_URL
+docker pull ubuntu:latest
+docker tag ubuntu:latest $REGISTRY_URL/ubuntu:latest
+docker push $REGISTRY_URL/ubuntu:latest
+
+# Check that pulls work
+docker rmi ubuntu:latest $REGISTRY_URL/ubuntu:latest
+docker pull $REGISTRY_URL/ubuntu:latest
+```
+
+### Configuring Pull fallback
+
+You can configure the R2 regitry to fallback to another registry if
+it doesn't exist in your R2 bucket. It will download from the registry
+and copy it into the R2 bucket. In the next pull it will be able to pull it directly from R2.
+
+This is very useful for migrating from one registry to `serverless-registry`.
+
+It supports both Basic and Bearer authentications as explained in the
+[registry spec](https://distribution.github.io/distribution/spec/auth/token/).
+
+In the wrangler.toml file:
+
+```
+[env.production]
+REGISTRIES_JSON = "[{ \"registry\": \"https://url-to-other-registry\", \"password_env\": \"REGISTRY_TOKEN\", \"username\": \"username-to-use\" }]"
+```
+
+Set as a secret the registry token of the registry you want to setup
+pull fallback in.
+
+For example [gcr](https://cloud.google.com/artifact-registry/docs/reference/docker-api):
+
+```
+cat ./registry-service-credentials.json | base64 | wrangler --env production secrets put REGISTRY_TOKEN
+```
+
+[Github](https://github.com/settings/tokens) for example uses a simple token that you can copy.
+
+```
+echo $GITHUB_TOKEN | wrangler --env production secrets put REGISTRY_TOKEN
+```
+
+The trick is always looking for how you would login in Docker for
+the target registry and setup the credentials.
+
+**Never put a registry password/token inside the wrangler.toml, please always use `wrangler secrets put`**
+
 ### Known limitations
 
 Right now there is some limitations with this docker registry.
