@@ -1,6 +1,6 @@
-# Docker Registry in Workers
+# Container Registry in Workers
 
-This repository contains a docker registry implementation in Workers that uses R2.
+This repository contains a container registry implementation in Workers that uses R2.
 
 It supports all pushing and pulling workflows. It also supports
 Username/Password and public key JWT based authentication.
@@ -106,7 +106,7 @@ the target registry and setup the credentials.
 
 ### Known limitations
 
-Right now there is some limitations with this docker registry.
+Right now there is some limitations with this container registry.
 
 - Pushing with docker is limited to images that have layers of maximum size 500MB. Refer to maximum request body sizes in your Workers plan.
 - To circumvent that limitation, you can manually add the layer and the manifest into the R2 bucket or use a client that is able to chunk uploads in sizes less than 500MB (or the limit that you have in your Workers plan).
