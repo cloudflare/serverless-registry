@@ -2,3 +2,4 @@
 *.env
 node_modules
 *.vars
+wrangler.toml
