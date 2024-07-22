@@ -25,5 +25,6 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile --child-concurrency=10
+      - run: cp wrangler.toml.example wrangler.toml
       - run: pnpm run typecheck
       - run: pnpm test

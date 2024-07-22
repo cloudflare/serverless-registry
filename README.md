@@ -15,7 +15,13 @@ $ pnpm install
 
 After installation, there is a few steps to actually deploy the registry into production:
 
-1. Setup the R2 Bucket for this registry
+1. Have your own `wrangler` file.
+
+```bash
+$ cp wrangler.toml.example wrangler.toml
+```
+
+2. Setup the R2 Bucket for this registry
 
 ```bash
 $ npx wrangler --env production r2 bucket create r2-registry
@@ -29,7 +35,7 @@ r2_buckets = [
 ]
 ```
 
-2. Deploy your image registry
+3. Deploy your image registry
 
 ```bash
 $ npx wrangler deploy --env production
