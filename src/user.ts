@@ -1,4 +1,5 @@
 import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePasswordFromHeader } from "./auth";
+import { errorString } from "./utils";
 
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
@@ -42,11 +43,16 @@ export class UserAuthenticator implements Authenticator {
       return { verified: false, payload: null };
     }
 
-    if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(username), stringToArrayBuffer(this.username))) {
-      return { verified: false, payload: null };
-    }
+    try {
+      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(username), stringToArrayBuffer(this.username))) {
+        return { verified: false, payload: null };
+      }
 
-    if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(password), stringToArrayBuffer(this.password))) {
+      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(password), stringToArrayBuffer(this.password))) {
+        return { verified: false, payload: null };
+      }
+    } catch (err) {
+      console.error(`Failed authentication timingSafeEqual: ${errorString(err)}`);
       return { verified: false, payload: null };
     }
 

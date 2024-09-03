@@ -7,6 +7,7 @@ import { RegistryTokens } from "./src/token";
 import { RegistryAuthProtocolTokenPayload } from "./src/auth";
 import { registries } from "./src/registry/registry";
 import { RegistryHTTPClient } from "./src/registry/http";
+import { encode } from "@cfworker/base64url";
 
 function createRequest(method: string, path: string, body: ReadableStream | null, headers = {}) {
   return new Request(new URL("https://registry.com" + path), { method, body: body, headers });
@@ -40,25 +41,58 @@ describe("v2", () => {
     const response = await fetchUnauth(createRequest("GET", "/v2/", null));
     expect(response.status).toBe(200);
   });
-});
 
-async function createManifest(name: string, data: string, tag?: string): Promise<{ sha256: string }> {
-  const sha256 = await getSHA256(data);
-  if (!tag) {
-    tag = sha256;
-  }
+  test("Username password authenticatiom fails gracefully when wrong format", async () => {
+    const bindings = getMiniflareBindings() as Env;
+    bindings.USERNAME = "hello";
+    bindings.PASSWORD = "world";
+    const res = await fetch(
+      createRequest("GET", `/v2/`, null, {
+        Authorization: `Basic ${encode("hello")}:${encode("t")}`,
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
 
-  const res = await fetchUnauth(
-    createRequest("PUT", `/v2/${name}/manifests/${tag}`, new Blob([data]).stream(), {
-      "Content-Type": "application/gzip",
-    }),
-  );
-  expect(res.ok).toBeTruthy();
-  expect(res.headers.get("docker-content-digest")).toEqual(sha256);
-  return { sha256 };
-}
+  test("Username password authenticatiom fails gracefully when password is wrong", async () => {
+    const bindings = getMiniflareBindings() as Env;
+    bindings.USERNAME = "hello";
+    bindings.PASSWORD = "world";
+    const cred = encode(`hello:t`);
+    const res = await fetch(
+      createRequest("GET", `/v2/`, null, {
+        Authorization: `Basic ${cred}`,
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
 
-describe("v2 manifests", () => {
+  test("Simple username password authenticatiom fails gracefully when password is wrong", async () => {
+    const bindings = getMiniflareBindings() as Env;
+    bindings.USERNAME = "hello";
+    bindings.PASSWORD = "world";
+    const cred = encode(`hello:t`);
+    const res = await fetch(
+      createRequest("GET", `/v2/`, null, {
+        Authorization: `Basic ${cred}`,
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  test("Simple username password authenticatiom fails gracefully when username is wrong", async () => {
+    const bindings = getMiniflareBindings() as Env;
+    bindings.USERNAME = "hello";
+    bindings.PASSWORD = "world";
+    const cred = encode(`hell0:world`);
+    const res = await fetch(
+      createRequest("GET", `/v2/`, null, {
+        Authorization: `Basic ${cred}`,
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   test("Simple username password authentication", async () => {
     const bindings = getMiniflareBindings() as Env;
     bindings.USERNAME = "hello";
@@ -79,7 +113,25 @@ describe("v2 manifests", () => {
     );
     expect(resAuthCorrect.ok).toBeTruthy();
   });
+});
 
+async function createManifest(name: string, data: string, tag?: string): Promise<{ sha256: string }> {
+  const sha256 = await getSHA256(data);
+  if (!tag) {
+    tag = sha256;
+  }
+
+  const res = await fetchUnauth(
+    createRequest("PUT", `/v2/${name}/manifests/${tag}`, new Blob([data]).stream(), {
+      "Content-Type": "application/gzip",
+    }),
+  );
+  expect(res.ok).toBeTruthy();
+  expect(res.headers.get("docker-content-digest")).toEqual(sha256);
+  return { sha256 };
+}
+
+describe("v2 manifests", () => {
   test("HEAD /v2/:name/manifests/:reference NOT FOUND", async () => {
     const response = await fetchUnauth(createRequest("GET", "/v2/notfound/manifests/reference", null));
     expect(response.status).toBe(404);
