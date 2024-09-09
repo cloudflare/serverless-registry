@@ -1,4 +1,5 @@
 import { decode } from "@cfworker/base64url";
+import { errorString } from "./utils";
 
 export type RegistryTokenCapability = "push" | "pull";
 export type RegistryAuthProtocolTokenPayload = {
@@ -39,21 +40,26 @@ export function stripUsernamePasswordFromHeader(r: Request): [string, string] | 
     return { verified: false, payload: null };
   }
 
-  // Decodes the base64 value and performs unicode normalization.
-  const decoded = decode(encoded);
+  try {
+    // Decodes the base64 value and performs unicode normalization.
+    const decoded = decode(encoded);
 
-  // The username & password are split by the first colon.
-  //=> example: "username:password"
-  const index = decoded.indexOf(":");
+    // The username & password are split by the first colon.
+    //=> example: "username:password"
+    const index = decoded.indexOf(":");
 
-  // The user & password are split by the first colon and MUST NOT contain control characters.
-  // @see https://tools.ietf.org/html/rfc5234#appendix-B.1 (=> "CTL = %x00-1F / %x7F")
-  // eslint-disable-next-line no-control-regex
-  if (index === -1 || /[\0-\x1F\x7F]/.test(decoded)) {
+    // The user & password are split by the first colon and MUST NOT contain control characters.
+    // @see https://tools.ietf.org/html/rfc5234#appendix-B.1 (=> "CTL = %x00-1F / %x7F")
+    // eslint-disable-next-line no-control-regex
+    if (index === -1 || /[\0-\x1F\x7F]/.test(decoded)) {
+      return { verified: false, payload: null };
+    }
+
+    const username = decoded.substring(0, index);
+    const password = decoded.substring(index + 1);
+    return [username, password];
+  } catch (err) {
+    console.error(`Failure getting data from Authorization header: ${errorString(err)}`);
     return { verified: false, payload: null };
   }
-
-  const username = decoded.substring(0, index);
-  const password = decoded.substring(index + 1);
-  return [username, password];
 }
