@@ -1,11 +1,18 @@
 import { decode } from "@cfworker/base64url";
 import { errorString } from "./utils";
+import { z } from "zod";
 
-export type RegistryTokenCapability = "push" | "pull";
+// list = only allows for tag discoverability
+// pull = only allows for read data methods
+// push = only allows for push (and HEAD) methods
+export const RegistryCapability = z.enum(["list", "pull", "push"]);
+
+export type RegistryCapability = z.infer<typeof RegistryCapability>;
+
 export type RegistryAuthProtocolTokenPayload = {
   username: string;
   account_id?: string;
-  capabilities: RegistryTokenCapability[];
+  capabilities: RegistryCapability[];
   exp: number;
   aud: string;
   iat?: number;

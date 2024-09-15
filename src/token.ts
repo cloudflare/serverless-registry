@@ -1,7 +1,7 @@
 import { decode } from "@cfworker/base64url";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 import {
-  RegistryTokenCapability,
+  RegistryCapability,
   RegistryAuthProtocolTokenPayload,
   stripUsernamePasswordFromHeader,
   Authenticator,
@@ -52,7 +52,7 @@ export class RegistryTokens implements Authenticator {
 
   async createToken(
     accountID: string,
-    caps: RegistryTokenCapability[],
+    caps: RegistryCapability[],
     expirationMinutes: number,
     privateKeyString: string,
     registryUrl: string,

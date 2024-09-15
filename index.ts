@@ -8,10 +8,37 @@ import v2Router from "./src/router";
 import { authenticationMethodFromEnv } from "./src/authentication-method";
 import { Registry } from "./src/registry/registry";
 import { R2Registry } from "./src/registry/r2";
+import { z } from "zod";
+import { RegistryCapability } from "./src/auth";
 
 // A full compatibility mode means that the r2 registry will try its best to
 // help the client on the layer push. See how we let the client push layers with chunked uploads for more information.
 type PushCompatibilityMode = "full" | "none";
+
+export const AuthConfiguration = z.array(
+  z
+    .object({
+      mode: z.literal("none"),
+      capabilities: z.array(RegistryCapability),
+    })
+    .or(
+      z
+        .object({
+          mode: z.literal("basic"),
+          username: z.string().min(1),
+          password_env: z.string().min(1),
+          capabilities: z.array(RegistryCapability),
+        })
+        .or(
+          z.object({
+            mode: z.literal("jwt"),
+            public_key: z.string(),
+          }),
+        ),
+    ),
+);
+
+export type AuthConfiguration = z.infer<typeof AuthConfiguration>;
 
 export interface Env {
   REGISTRY: R2Bucket;
@@ -22,6 +49,7 @@ export interface Env {
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
+  AUTH: AuthConfiguration;
 }
 
 const router = Router();

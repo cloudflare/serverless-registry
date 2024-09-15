@@ -1,4 +1,9 @@
-import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePasswordFromHeader } from "./auth";
+import {
+  Authenticator,
+  AuthenticatorCheckCredentialsResponse,
+  RegistryCapability,
+  stripUsernamePasswordFromHeader,
+} from "./auth";
 import { errorString } from "./utils";
 
 export const SHA256_PREFIX = "sha256";
@@ -28,7 +33,7 @@ export async function getSHA256(data: string, prefix: string = SHA256_PREFIX + "
 
 export class UserAuthenticator implements Authenticator {
   authmode: string;
-  constructor(private username: string, private password: string) {
+  constructor(private username: string, private password: string, private capabilities: RegistryCapability[]) {
     this.authmode = "UserAuthenticator";
   }
 
@@ -60,7 +65,7 @@ export class UserAuthenticator implements Authenticator {
       verified: true,
       payload: {
         username,
-        capabilities: ["pull", "push"],
+        capabilities: ["pull", "push", "list"],
         exp: Date.now() + 60 * 60,
         aud: "",
       },

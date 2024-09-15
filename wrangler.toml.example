@@ -11,8 +11,10 @@ r2_buckets = [
   { binding = "REGISTRY", bucket_name = "" }
 ]
 
+
 [env.production.vars]
 JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
+AUTH = [{ mode = "basic" username = "v1" password_env = "PASSWORD" }]
 
 # Secrets:
 # USERNAME/PASSWORD if you want username/password based auth
