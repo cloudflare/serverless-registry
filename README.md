@@ -74,7 +74,7 @@ docker pull $REGISTRY_URL/ubuntu:latest
 
 ### Configuring Pull fallback
 
-You can configure the R2 regitry to fallback to another registry if
+You can configure the R2 registry to fallback to another registry if
 it doesn't exist in your R2 bucket. It will download from the registry
 and copy it into the R2 bucket. In the next pull it will be able to pull it directly from R2.
 
