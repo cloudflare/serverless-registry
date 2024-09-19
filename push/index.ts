@@ -80,7 +80,15 @@ const tasks = [];
 for (const layer of manifest.Layers) {
   tasks.push(
     pool(async () => {
-      const layerCachePath = path.join(cacheFolder, path.dirname(layer) + "-ptr");
+      let layerPath = path.join(imagePath, layer);
+      // docker likes to put stuff in two ways:
+      //   1. blobs/sha256/<layer>
+      //   2. <layer>/layer.tar
+      //
+      // This handles both cases.
+      let layerName = layer.endsWith(".tar") ? path.dirname(layer) : path.basename(layer);
+
+      const layerCachePath = path.join(cacheFolder, layerName + "-ptr");
       {
         const layerCacheGzip = file(layerCachePath);
         if (await layerCacheGzip.exists()) {
@@ -89,12 +97,10 @@ for (const layer of manifest.Layers) {
         }
       }
 
-      const layerPath = path.join(imagePath, layer);
-
-      const inprogressPath = path.join(cacheFolder, path.dirname(layer) + "-in-progress");
+      const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
 
       await rm(inprogressPath, { recursive: true });
-      const layerCacheGzip = file(inprogressPath);
+      const layerCacheGzip = file(inprogressPath, {});
 
       const cacheWriter = layerCacheGzip.writer();
       const hasher = new Bun.CryptoHasher("sha256");
@@ -285,8 +291,6 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
     if (rangeResponse !== expectedRange) {
       throw new Error(`unexpected Range header ${rangeResponse}, expected ${expectedRange}`);
     }
-
-    console.log("pushed", layerDigest);
   }
 
   const range = `0-${written - 1}`;
@@ -303,6 +307,8 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
   if (!response.ok) {
     throw new Error(`${uploadURL.toString()} failed with ${response.status}: ${await response.text()}`);
   }
+
+  console.log("pushed", layerDigest);
 }
 
 const layersManifest = [] as {
@@ -318,11 +324,9 @@ for (const compressedDigest of compressedDigests) {
     size: layer.size,
     digest: `sha256:${compressedDigest}`,
   } as const);
-  pushTasks.push(
-    pool(async () => {
-      await pushLayer(`sha256:${compressedDigest}`, layer.stream(), layer.size);
-    }),
-  );
+  await pool(async () => {
+    await pushLayer(`sha256:${compressedDigest}`, layer.stream(), layer.size);
+  });
 }
 
 pushTasks.push(
@@ -355,7 +359,7 @@ const manifestUploadURL = `${proto}://${imageHost}/v2${imageRepositoryPath}/mani
 const responseManifestUpload = await fetch(manifestUploadURL, {
   headers: {
     "Authorization": cred,
-    "Content-Type": "application/json",
+    "Content-Type": manifestObject.mediaType,
   },
   body: JSON.stringify(manifestObject),
   method: "PUT",
