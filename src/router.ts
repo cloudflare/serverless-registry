@@ -562,13 +562,13 @@ v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
   });
 });
 
-v2Router.post("/:name+/collectgarbage", async (req, env: Env, context: ExecutionContext) => {
+v2Router.post("/:name+/gc", async (req, env: Env) => {
   const { name } = req.params;
   const mode = req.query.mode ?? "unreferenced";
   if (mode !== "unreferenced" && mode !== "untagged") {
     throw new ServerError("Mode must be either 'unreferenced' or 'untagged'", 400);
   }
-  const result = await env.REGISTRY_CLIENT.collectGarbage(context, name, mode);
+  const result = await env.REGISTRY_CLIENT.garbageCollection(name, mode);
   return new Response(JSON.stringify({ success: result }));
 });
 

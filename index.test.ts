@@ -1,8 +1,7 @@
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 import { SHA256_PREFIX_LEN, getSHA256 } from "./src/user";
 import { TagsList } from "./src/router";
 import { Env } from ".";
-import * as fetchAuth from "./index";
 import { RegistryTokens } from "./src/token";
 import { RegistryAuthProtocolTokenPayload } from "./src/auth";
 import { registries } from "./src/registry/registry";
@@ -187,11 +186,39 @@ describe("v2 manifests", () => {
   test("PUT then DELETE /v2/:name/manifests/:reference works", async () => {
     const { sha256 } = await createManifest("hello-world", await generateManifest("hello-world"), "hello");
     const bindings = env as Env;
+
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+      expect(listObjects.objects.length).toEqual(1);
+
+      const gcRes = await fetch(new Request("http://registry.com/v2/hello-world/gc", { method: "POST" }));
+      if (!gcRes.ok) {
+        throw new Error(`${gcRes.status}: ${await gcRes.text()}`);
+      }
+
+      const listObjectsAfterGC = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+      expect(listObjectsAfterGC.objects.length).toEqual(1);
+    }
+
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeTruthy();
     const res = await fetch(createRequest("DELETE", `/v2/hello-world/manifests/${sha256}`, null));
     expect(res.status).toEqual(202);
     expect(await bindings.REGISTRY.head(`hello-world/manifests/${sha256}`)).toBeNull();
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeNull();
+
+    const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+    expect(listObjects.objects.length).toEqual(1);
+
+    const listObjectsManifests = await bindings.REGISTRY.list({ prefix: "hello-world/manifests/" });
+    expect(listObjectsManifests.objects.length).toEqual(0);
+
+    const gcRes = await fetch(new Request("http://registry.com/v2/hello-world/gc", { method: "POST" }));
+    if (!gcRes.ok) {
+      throw new Error(`${gcRes.status}: ${await gcRes.text()}`);
+    }
+
+    const listObjectsAfterGC = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+    expect(listObjectsAfterGC.objects.length).toEqual(0);
   });
 
   test("PUT multiple parts then DELETE /v2/:name/manifests/:reference works", async () => {
