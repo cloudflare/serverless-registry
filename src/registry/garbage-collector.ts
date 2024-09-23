@@ -2,6 +2,7 @@
 // Unreferenced will delete all blobs that are not referenced by any manifest.
 // Untagged will delete all blobs that are not referenced by any manifest and are not tagged.
 
+import { ServerError } from "../errors";
 import { ManifestSchema } from "../manifest";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
@@ -16,17 +17,19 @@ export type GCOptions = {
 //
 // Summary:
 //          insertParent() {
+//              gcMark = getGCMark(); // get last gc mark
 //              mark = updateInsertMark(); // mark insertion
 //              defer cleanInsertMark(mark);
 //              checkEveryChildIsOK();
-//              getDeletionMarkIsFalse(); // make sure not ongoing deletion mark after checking child is in db
+//              gcMarkIsEqualAndNotOngoingGc(gcMark); // make sure not ongoing deletion mark after checking child is in db
 //              insertParent(); // insert parent in db
 //           }
 //
 //           gc() {
-//             setDeletionMark() // marks deletion as gc
-//             defer { cleanDeletionMark(); } // clean up mark
-//             checkNotOngoingInsertMark() // makes sure not ongoing updateInsertMark
+//             insertionMark = getInsertionMark() // get last insertion mark
+//             mark = setGCMark() // marks deletion as gc
+//             defer { cleanGCMark(mark); } // clean up mark
+//             checkNotOngoingInsertMark(mark) // makes sure not ongoing updateInsertMark, and no new one
 //             deleteChildrenWithoutParent(); // go ahead and clean children
 //           }
 //
@@ -41,40 +44,90 @@ export class GarbageCollector {
 
   async markForGarbageCollection(namespace: string): Promise<string> {
     const etag = crypto.randomUUID();
-    const deletion = await this.registry.put(`${namespace}/deletion`, etag);
+    const deletion = await this.registry.put(`${namespace}/gc/marker`, etag);
     if (deletion === null) throw new Error("unreachable");
+    // set last_update so inserters are able to invalidate
+    await this.registry.put(`${namespace}/gc/last_update`, null, {
+      customMetadata: { timestamp: `${Date.now()}-${crypto.randomUUID()}` },
+    });
     return etag;
   }
 
   async cleanupGarbageCollectionMark(namespace: string) {
-    await this.registry.delete(`${namespace}/deletion`);
+    // set last_update so inserters can confirm that a GC didnt happen while they were confirming data
+    await this.registry.put(`${namespace}/gc/last_update`, null, {
+      customMetadata: { timestamp: `${Date.now()}-${crypto.randomUUID()}` },
+    });
+    await this.registry.delete(`${namespace}/gc/marker`);
   }
 
-  async checkCanInsertData(namespace: string): Promise<boolean> {
-    const deletion = await this.registry.head(`${namespace}/deletion`);
-    if (deletion === null) {
-      return true;
+  async getGCMarker(namespace: string): Promise<string> {
+    const object = await this.registry.head(`${namespace}/gc/last_update`);
+    if (object === null) {
+      return "";
     }
 
-    return false;
+    if (object.customMetadata === undefined) {
+      return "";
+    }
+
+    return object.customMetadata["timestamp"] ?? "mark";
+  }
+
+  async checkCanInsertData(namespace: string, mark: string): Promise<boolean> {
+    const gcMarker = await this.registry.head(`${namespace}/gc/marker`);
+    if (gcMarker !== null) {
+      return false;
+    }
+
+    const newMarker = await this.getGCMarker(namespace);
+    // There's been a new garbage collection since we started the check for insertion
+    if (newMarker !== mark) return false;
+
+    return true;
   }
 
   // If successful, it inserted in R2 that its going
   // to start inserting data that might conflight with GC.
   async markForInsertion(namespace: string): Promise<string> {
     const uid = crypto.randomUUID();
+    // mark that there is an on-going insertion
     const deletion = await this.registry.put(`${namespace}/insertion/${uid}`, uid);
     if (deletion === null) throw new Error("unreachable");
+    // set last_update so GC is able to invalidate
+    await this.registry.put(`${namespace}/insertion/last_update`, null, {
+      customMetadata: { timestamp: `${Date.now()}-${crypto.randomUUID()}` },
+    });
+
     return uid;
   }
 
   async cleanInsertion(namespace: string, tag: string) {
+    // update again to invalidate GC and the insertion is safe
+    await this.registry.put(`${namespace}/insertion/last_update`, null, {
+      customMetadata: { timestamp: `${Date.now()}-${crypto.randomUUID()}` },
+    });
+
     await this.registry.delete(`${namespace}/insertion/${tag}`);
   }
 
-  async checkIfGCCanContinue(namespace: string): Promise<boolean> {
+  async getInsertionMark(namespace: string): Promise<string> {
+    const object = await this.registry.head(`${namespace}/insertion/last_update`);
+    if (object === null) {
+      return "";
+    }
+
+    if (object.customMetadata === undefined) {
+      return "";
+    }
+
+    return object.customMetadata["timestamp"] ?? "mark";
+  }
+
+  async checkIfGCCanContinue(namespace: string, mark: string): Promise<boolean> {
     const objects = await this.registry.list({ prefix: `${namespace}/insertion` });
     for (const object of objects.objects) {
+      if (object.key.endsWith("/last_update")) continue;
       if (object.uploaded.getTime() + 1000 * 60 <= Date.now()) {
         await this.registry.delete(object.key);
       } else {
@@ -84,6 +137,12 @@ export class GarbageCollector {
 
     // call again to clean more
     if (objects.truncated) return false;
+
+    const newMark = await this.getInsertionMark(namespace);
+    if (newMark !== mark) {
+      return false;
+    }
+
     return true;
   }
 
@@ -124,6 +183,7 @@ export class GarbageCollector {
   private async collectInner(options: GCOptions): Promise<boolean> {
     // We can run out of memory, this should be a bloom filter
     let referencedBlobs = new Set<string>();
+    const mark = await this.getInsertionMark(options.name);
 
     await this.list(`${options.name}/manifests/`, async (manifestObject) => {
       const tag = manifestObject.key.split("/").pop();
@@ -146,14 +206,14 @@ export class GarbageCollector {
     let unreferencedKeys: string[] = [];
     const deleteThreshold = 15;
     await this.list(`${options.name}/blobs/`, async (object) => {
-      if (!(await this.checkIfGCCanContinue(options.name))) {
-        throw new Error("there is a manifest insertion going, the garbage collection shall stop");
-      }
-
       const hash = object.key.split("/").pop();
       if (hash && !referencedBlobs.has(hash)) {
         unreferencedKeys.push(object.key);
         if (unreferencedKeys.length > deleteThreshold) {
+          if (!(await this.checkIfGCCanContinue(options.name, mark))) {
+            throw new ServerError("there is a manifest insertion going, the garbage collection shall stop");
+          }
+
           await this.registry.delete(unreferencedKeys);
           unreferencedKeys = [];
         }
@@ -161,6 +221,10 @@ export class GarbageCollector {
       return true;
     });
     if (unreferencedKeys.length > 0) {
+      if (!(await this.checkIfGCCanContinue(options.name, mark))) {
+        throw new Error("there is a manifest insertion going, the garbage collection shall stop");
+      }
+
       await this.registry.delete(unreferencedKeys);
     }
 

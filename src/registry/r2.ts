@@ -293,6 +293,7 @@ export class R2Registry implements Registry {
     readableStream: ReadableStream<any>,
     contentType: string,
   ): Promise<PutManifestResponse | RegistryError> {
+    const gcMarker = await this.gc.getGCMarker(name);
     const env = this.env;
     const sha256 = new crypto.DigestStream("SHA-256");
     const reader = readableStream.getReader();
@@ -308,8 +309,8 @@ export class R2Registry implements Registry {
     const verifyManifestErr = await this.verifyManifest(name, manifest);
     if (verifyManifestErr !== null) return { response: verifyManifestErr };
 
-    if (!(await this.gc.checkCanInsertData(name))) {
-      console.error("Manifest can't be uploaded as there is a garbage collection going");
+    if (!(await this.gc.checkCanInsertData(name, gcMarker))) {
+      console.error("Manifest can't be uploaded as there is/was a garbage collection going");
       return { response: new ServerError("garbage collection is on-going... check with registry administrator", 500) };
     }
 
