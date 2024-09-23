@@ -21,6 +21,7 @@ JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 ## Dev - For local dev using `npx wrangler dev`
 [env.dev]
 r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
+
 [env.dev.vars]
 # REGISTRIES_JSON = "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
 USERNAME = "hello"

@@ -1,13 +1,12 @@
-import { defineConfig } from "vitest/config";
+import { defineWorkersProject } from "@cloudflare/vitest-pool-workers/config";
 
-export default defineConfig({
+export default defineWorkersProject({
   test: {
-    environment: "miniflare",
-    // Configuration is automatically loaded from `.env`, `package.json` and
-    // `wrangler.toml` files by default, but you can pass any additional Miniflare
-    // API options here:
-    environmentOptions: {
-      r2Buckets: ["REGISTRY"],
+    poolOptions: {
+      workers: {
+        singleWorker: true,
+        wrangler: { configPath: "./wrangler.test.toml", environment: "dev" },
+      },
     },
   },
 });

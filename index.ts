@@ -77,7 +77,7 @@ export default {
       return new InternalError();
     }
   },
-};
+} satisfies ExportedHandler<Env>;
 
 const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
