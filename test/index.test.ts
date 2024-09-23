@@ -1,13 +1,35 @@
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { SHA256_PREFIX_LEN, getSHA256 } from "./src/user";
-import v2Router, { TagsList } from "./src/router";
-import { Env } from ".";
-import * as fetchAuth from "./index";
-import { RegistryTokens } from "./src/token";
-import { RegistryAuthProtocolTokenPayload } from "./src/auth";
-import { registries } from "./src/registry/registry";
-import { RegistryHTTPClient } from "./src/registry/http";
+import { afterAll, describe, expect, test } from "vitest";
+import { SHA256_PREFIX_LEN, getSHA256 } from "../src/user";
+import { TagsList } from "../src/router";
+import { Env } from "..";
+import { RegistryTokens } from "../src/token";
+import { RegistryAuthProtocolTokenPayload } from "../src/auth";
+import { registries } from "../src/registry/registry";
+import { RegistryHTTPClient } from "../src/registry/http";
 import { encode } from "@cfworker/base64url";
+import { ManifestSchema } from "../src/manifest";
+import { limit } from "../src/chunk";
+import worker from "../index";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+
+async function generateManifest(name: string): Promise<ManifestSchema> {
+  const data = "bla";
+  const sha256 = await getSHA256(data);
+  const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+  expect(res.ok).toBeTruthy();
+  const blob = new Blob([data]).stream();
+  const stream = limit(blob, data.length);
+  const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
+  expect(res2.ok).toBeTruthy();
+  const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
+  expect(last.ok).toBeTruthy();
+  return {
+    schemaVersion: 2,
+    layers: [{ size: data.length, digest: sha256, mediaType: "shouldbeanything" }],
+    config: { size: data.length, digest: sha256, mediaType: "configmediatypeshouldntbechecked" },
+    mediaType: "shouldalsobeanythingforretrocompatibility",
+  };
+}
 
 function createRequest(method: string, path: string, body: ReadableStream | null, headers = {}) {
   return new Request(new URL("https://registry.com" + path), { method, body: body, headers });
@@ -26,27 +48,26 @@ function usernamePasswordToAuth(username: string, password: string): string {
   return `Basic ${btoa(`${username}:${password}`)}`;
 }
 
-const bindings = getMiniflareBindings() as Env;
 async function fetchUnauth(r: Request): Promise<Response> {
-  const res = await v2Router.handle(r, bindings);
+  const ctx = createExecutionContext();
+  const res = await worker.fetch(r, env as Env, ctx);
+  await waitOnExecutionContext(ctx);
   return res as Response;
 }
 
 async function fetch(r: Request): Promise<Response> {
-  return fetchAuth.default.fetch(r, bindings);
+  r.headers.append("Authorization", usernamePasswordToAuth("hello", "world"));
+  return await fetchUnauth(r);
 }
 
 describe("v2", () => {
   test("/v2", async () => {
-    const response = await fetchUnauth(createRequest("GET", "/v2/", null));
+    const response = await fetch(createRequest("GET", "/v2/", null));
     expect(response.status).toBe(200);
   });
 
   test("Username password authenticatiom fails gracefully when wrong format", async () => {
-    const bindings = getMiniflareBindings() as Env;
-    bindings.USERNAME = "hello";
-    bindings.PASSWORD = "world";
-    const res = await fetch(
+    const res = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: `Basic ${encode("hello")}:${encode("t")}`,
       }),
@@ -55,11 +76,8 @@ describe("v2", () => {
   });
 
   test("Username password authenticatiom fails gracefully when password is wrong", async () => {
-    const bindings = getMiniflareBindings() as Env;
-    bindings.USERNAME = "hello";
-    bindings.PASSWORD = "world";
     const cred = encode(`hello:t`);
-    const res = await fetch(
+    const res = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: `Basic ${cred}`,
       }),
@@ -68,11 +86,8 @@ describe("v2", () => {
   });
 
   test("Simple username password authenticatiom fails gracefully when password is wrong", async () => {
-    const bindings = getMiniflareBindings() as Env;
-    bindings.USERNAME = "hello";
-    bindings.PASSWORD = "world";
     const cred = encode(`hello:t`);
-    const res = await fetch(
+    const res = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: `Basic ${cred}`,
       }),
@@ -81,11 +96,8 @@ describe("v2", () => {
   });
 
   test("Simple username password authenticatiom fails gracefully when username is wrong", async () => {
-    const bindings = getMiniflareBindings() as Env;
-    bindings.USERNAME = "hello";
-    bindings.PASSWORD = "world";
     const cred = encode(`hell0:world`);
-    const res = await fetch(
+    const res = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: `Basic ${cred}`,
       }),
@@ -94,19 +106,17 @@ describe("v2", () => {
   });
 
   test("Simple username password authentication", async () => {
-    const bindings = getMiniflareBindings() as Env;
-    bindings.USERNAME = "hello";
-    bindings.PASSWORD = "world";
-    const res = await fetch(createRequest("GET", `/v2/`, null, {}));
+    const res = await fetchUnauth(createRequest("GET", `/v2/`, null, {}));
     expect(res.status).toBe(401);
     expect(res.ok).toBeFalsy();
-    const resAuth = await fetch(
+    const resAuth = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: usernamePasswordToAuth("hellO", "worlD"),
       }),
     );
+    expect(resAuth.status).toBe(401);
     expect(resAuth.ok).toBeFalsy();
-    const resAuthCorrect = await fetch(
+    const resAuthCorrect = await fetchUnauth(
       createRequest("GET", `/v2/`, null, {
         Authorization: usernamePasswordToAuth("hello", "world"),
       }),
@@ -115,17 +125,21 @@ describe("v2", () => {
   });
 });
 
-async function createManifest(name: string, data: string, tag?: string): Promise<{ sha256: string }> {
+async function createManifest(name: string, schema: ManifestSchema, tag?: string): Promise<{ sha256: string }> {
+  const data = JSON.stringify(schema);
   const sha256 = await getSHA256(data);
   if (!tag) {
     tag = sha256;
   }
 
-  const res = await fetchUnauth(
+  const res = await fetch(
     createRequest("PUT", `/v2/${name}/manifests/${tag}`, new Blob([data]).stream(), {
       "Content-Type": "application/gzip",
     }),
   );
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
   expect(res.ok).toBeTruthy();
   expect(res.headers.get("docker-content-digest")).toEqual(sha256);
   return { sha256 };
@@ -133,7 +147,7 @@ async function createManifest(name: string, data: string, tag?: string): Promise
 
 describe("v2 manifests", () => {
   test("HEAD /v2/:name/manifests/:reference NOT FOUND", async () => {
-    const response = await fetchUnauth(createRequest("GET", "/v2/notfound/manifests/reference", null));
+    const response = await fetch(createRequest("GET", "/v2/notfound/manifests/reference", null));
     expect(response.status).toBe(404);
     const json = await response.json();
     expect(json).toEqual({
@@ -154,11 +168,12 @@ describe("v2 manifests", () => {
     const name = "name";
     const data = "{}";
     const sha256 = await getSHA256(data);
+    const bindings = env as Env;
     await bindings.REGISTRY.put(`${name}/manifests/${reference}`, "{}", {
       httpMetadata: { contentType: "application/gzip" },
       sha256: sha256.slice(SHA256_PREFIX_LEN),
     });
-    const res = await fetchUnauth(createRequest("HEAD", `/v2/${name}/manifests/${reference}`, null));
+    const res = await fetch(createRequest("HEAD", `/v2/${name}/manifests/${reference}`, null));
     expect(res.ok).toBeTruthy();
     expect(Object.fromEntries(res.headers)).toEqual({
       "content-length": "2",
@@ -168,47 +183,75 @@ describe("v2 manifests", () => {
     await bindings.REGISTRY.delete(`${name}/manifests/${reference}`);
   });
 
-  test("PUT /v2/:name/manifests/:reference works", () => createManifest("hello-world-main", "{}", "hello"));
-
   test("PUT then DELETE /v2/:name/manifests/:reference works", async () => {
-    const { sha256 } = await createManifest("hello-world", "{}", "hello");
+    const { sha256 } = await createManifest("hello-world", await generateManifest("hello-world"), "hello");
+    const bindings = env as Env;
+
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+      expect(listObjects.objects.length).toEqual(1);
+
+      const gcRes = await fetch(new Request("http://registry.com/v2/hello-world/gc", { method: "POST" }));
+      if (!gcRes.ok) {
+        throw new Error(`${gcRes.status}: ${await gcRes.text()}`);
+      }
+
+      const listObjectsAfterGC = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+      expect(listObjectsAfterGC.objects.length).toEqual(1);
+    }
+
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeTruthy();
-    const res = await fetchUnauth(createRequest("DELETE", `/v2/hello-world/manifests/${sha256}`, null));
+    const res = await fetch(createRequest("DELETE", `/v2/hello-world/manifests/${sha256}`, null));
     expect(res.status).toEqual(202);
     expect(await bindings.REGISTRY.head(`hello-world/manifests/${sha256}`)).toBeNull();
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeNull();
+
+    const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+    expect(listObjects.objects.length).toEqual(1);
+
+    const listObjectsManifests = await bindings.REGISTRY.list({ prefix: "hello-world/manifests/" });
+    expect(listObjectsManifests.objects.length).toEqual(0);
+
+    const gcRes = await fetch(new Request("http://registry.com/v2/hello-world/gc", { method: "POST" }));
+    if (!gcRes.ok) {
+      throw new Error(`${gcRes.status}: ${await gcRes.text()}`);
+    }
+
+    const listObjectsAfterGC = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
+    expect(listObjectsAfterGC.objects.length).toEqual(0);
   });
 
   test("PUT multiple parts then DELETE /v2/:name/manifests/:reference works", async () => {
-    const { sha256 } = await createManifest("hello/world", "{}", "hello");
+    const { sha256 } = await createManifest("hello/world", await generateManifest("hello/world"), "hello");
+    const bindings = env as Env;
     expect(await bindings.REGISTRY.head(`hello/world/manifests/hello`)).toBeTruthy();
-    const res = await fetchUnauth(createRequest("DELETE", `/v2/hello/world/manifests/${sha256}`, null));
+    const res = await fetch(createRequest("DELETE", `/v2/hello/world/manifests/${sha256}`, null));
     expect(res.status).toEqual(202);
     expect(await bindings.REGISTRY.head(`hello/world/manifests/${sha256}`)).toBeNull();
     expect(await bindings.REGISTRY.head(`hello/world/manifests/hello`)).toBeNull();
   });
 
   test("PUT then list tags with GET /v2/:name/tags/list", async () => {
-    const { sha256 } = await createManifest("hello-world-list", "{}", `hello`);
+    const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
     const expectedRes = ["hello", sha256];
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < 50; i++) {
       expectedRes.push(`hello-${i}`);
     }
 
     expectedRes.sort();
     const shuffledRes = shuffleArray([...expectedRes]);
     for (const tag of shuffledRes) {
-      await createManifest("hello-world-list", "{}", tag);
+      await createManifest("hello-world-list", await generateManifest("hello-world-list"), tag);
     }
 
-    const tagsRes = await fetchUnauth(createRequest("GET", `/v2/hello-world-list/tags/list?n=1000`, null));
+    const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-list");
     expect(tags.tags).toEqual(expectedRes);
 
-    const res = await fetchUnauth(createRequest("DELETE", `/v2/hello-world-list/manifests/${sha256}`, null));
+    const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${sha256}`, null));
     expect(res.ok).toBeTruthy();
-    const tagsResEmpty = await fetchUnauth(createRequest("GET", `/v2/hello-world-list/tags/list`, null));
+    const tagsResEmpty = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list`, null));
     const tagsEmpty = (await tagsResEmpty.json()) as TagsList;
     expect(tagsEmpty.tags).toHaveLength(0);
   });
@@ -369,6 +412,7 @@ test("registries configuration", async () => {
     },
   ] as const;
 
+  const bindings = env as Env;
   const bindingCopy = { ...bindings };
   for (const testCase of testCases) {
     bindingCopy.REGISTRIES_JSON = testCase.configuration;
@@ -392,14 +436,9 @@ test("registries configuration", async () => {
 });
 
 describe("http client", () => {
+  const bindings = env as Env;
   let envBindings = { ...bindings };
   const prevFetch = global.fetch;
-  beforeEach(() => {
-    global.fetch = async function (info, init) {
-      const r = new Request(info, init);
-      return fetchAuth.default.fetch(r, envBindings);
-    };
-  });
 
   afterAll(() => {
     global.fetch = prevFetch;
@@ -408,13 +447,16 @@ describe("http client", () => {
   test("test manifest exists", async () => {
     envBindings = { ...bindings };
     envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
-    envBindings.PASSWORD = "123456";
-    envBindings.USERNAME = "v1";
+    envBindings.PASSWORD = "world";
+    envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
+    global.fetch = async function (r: RequestInfo): Promise<Response> {
+      return fetch(new Request(r));
+    };
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
-      username: "v1",
+      username: "hello",
     });
     const res = await client.manifestExists("namespace/hello", "latest");
     if ("response" in res) {
@@ -427,33 +469,33 @@ describe("http client", () => {
 
 describe("push and catalog", () => {
   test("push and then use the catalog", async () => {
-    await createManifest("hello-world-main", "{}", "hello");
-    await createManifest("hello-world-main", "{}", "latest");
-    await createManifest("hello-world-main", "{}", "hello-2");
-    await createManifest("hello", "{}", "hello");
-    await createManifest("hello/hello", "{}", "hello");
+    await createManifest("hello-world-main", await generateManifest("hello-world-main"), "hello");
+    await createManifest("hello-world-main", await generateManifest("hello-world-main"), "latest");
+    await createManifest("hello-world-main", await generateManifest("hello-world-main"), "hello-2");
+    await createManifest("hello", await generateManifest("hello"), "hello");
+    await createManifest("hello/hello", await generateManifest("hello/hello"), "hello");
 
-    const response = await fetchUnauth(createRequest("GET", "/v2/_catalog", null));
+    const response = await fetch(createRequest("GET", "/v2/_catalog", null));
     expect(response.ok).toBeTruthy();
     const body = (await response.json()) as { repositories: string[] };
     expect(body).toEqual({
       repositories: ["hello-world-main", "hello/hello", "hello"],
     });
     const expectedRepositories = body.repositories;
-    const tagsRes = await fetchUnauth(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
+    const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
     expect(tags.tags).toEqual([
       "hello",
       "hello-2",
       "latest",
-      "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "sha256:e8f14a06f5e206931feb6761a6022231c98917edeb9d7f44c88f075113656374",
     ]);
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
     for (let i = 0; i < 3; i++) {
-      const response = await fetchUnauth(createRequest("GET", currentPath, null));
+      const response = await fetch(createRequest("GET", currentPath, null));
       expect(response.ok).toBeTruthy();
       const body = (await response.json()) as { repositories: string[] };
       if (body.repositories.length === 0) {

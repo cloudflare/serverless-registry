@@ -7,7 +7,7 @@
     "deploy": "wrangler publish",
     "dev:miniflare": "cross-env NODE_ENV=development wrangler --env dev dev --port 9999 --live-reload",
     "typecheck": "tsc",
-    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules vitest run"
+    "test": "vitest --config test/vitest.config.ts run"
   },
   "dependencies": {
     "@cfworker/base64url": "^1.12.5",
@@ -16,23 +16,23 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.7",
     "@cloudflare/workers-types": "^4.20240614.0",
     "cross-env": "^7.0.3",
     "eslint": "^8.57.0",
-    "miniflare": "3.20240208.0",
+    "miniflare": "3.20240909.4",
     "typescript": "^5.3.3",
-    "vitest": "^1.3.1",
-    "vitest-environment-miniflare": "^2.14.2",
-    "wrangler": "^3.61.0"
+    "vitest": "^2.1.0",
+    "wrangler": "^3.78.7"
   },
   "engines": {
     "node": ">=18"
   },
   "author": "",
   "license": "Apache-2.0",
-	"pnpm": {
-		"overrides": {
-			"@types/node": "18.15.3"
-		}
-	}
+  "pnpm": {
+    "overrides": {
+      "@types/node": "18.15.3"
+    }
+  }
 }

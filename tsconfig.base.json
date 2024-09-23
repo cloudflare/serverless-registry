@@ -5,7 +5,7 @@
     "experimentalDecorators": true,
     "module": "esnext",
     "moduleResolution": "node",
-    "types": ["@cloudflare/workers-types", "vitest-environment-miniflare/globals"],
+    "types": ["@cloudflare/workers-types",  "@cloudflare/vitest-pool-workers"],
     "resolveJsonModule": true,
     "allowJs": true,
     "noEmit": true,

@@ -9,7 +9,7 @@ import {
   limit,
   split,
 } from "../chunk";
-import { InternalError, RangeError, ServerError } from "../errors";
+import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
 import { SHA256_PREFIX_LEN, getSHA256, hexToDigest } from "../user";
 import { readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
@@ -27,6 +27,8 @@ import {
   UploadObject,
   wrapError,
 } from "./registry";
+import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
+import { ManifestSchema, manifestSchema } from "../manifest";
 
 export type Chunk =
   | {
@@ -126,7 +128,11 @@ export async function getUploadState(
 }
 
 export class R2Registry implements Registry {
-  constructor(private env: Env) {}
+  private gc: GarbageCollector;
+
+  constructor(private env: Env) {
+    this.gc = new GarbageCollector(this.env.REGISTRY);
+  }
 
   async manifestExists(name: string, reference: string): Promise<RegistryError | CheckManifestResponse> {
     const [res, err] = await wrap(this.env.REGISTRY.head(`${name}/manifests/${reference}`));
@@ -169,13 +175,19 @@ export class R2Registry implements Registry {
     const repositories: Record<string, {}> = {};
     let totalRecords = 0;
     let lastSeen: string | undefined;
-    const objectExistsInPath = (entry: string) => {
+    const objectExistsInPath = (entry?: string) => {
+      if (entry === undefined) return false;
       const parts = entry.split("/");
       const repository = parts.slice(0, parts.length - 2).join("/");
       return repository in repositories;
     };
 
+    const repositoriesOrder: string[] = [];
     const addObjectPath = (object: R2Object) => {
+      if (totalRecords >= options.limit && !objectExistsInPath(object.key)) {
+        return;
+      }
+
       // update lastSeen for cursoring purposes
       lastSeen = object.key;
       // don't add if seen before
@@ -185,22 +197,23 @@ export class R2Registry implements Registry {
       // <path>/<'blobs' | 'manifests'>/<name>
       const parts = object.key.split("/");
       const repository = parts.slice(0, parts.length - 2).join("/");
-      if (!(repository in repositories)) {
-        totalRecords++;
-      }
+      if (parts[parts.length - 2] === "blobs") return;
 
+      if (repository in repositories) return;
+      totalRecords++;
       repositories[repository] = {};
+      repositoriesOrder.push(repository);
     };
 
     const r2Objects = await this.env.REGISTRY.list({
-      limit: options.limit,
+      limit: 50,
       startAfter: options.startAfter,
     });
     r2Objects.objects.forEach((path) => addObjectPath(path));
     let cursor = r2Objects.truncated ? r2Objects.cursor : undefined;
     while (cursor !== undefined && totalRecords < options.limit) {
       const next = await this.env.REGISTRY.list({
-        limit: options.limit,
+        limit: 50,
         cursor,
       });
       next.objects.forEach((path) => addObjectPath(path));
@@ -213,18 +226,19 @@ export class R2Registry implements Registry {
 
     while (cursor !== undefined && typeof lastSeen === "string" && objectExistsInPath(lastSeen)) {
       const nextList: R2Objects = await this.env.REGISTRY.list({
-        limit: 1000,
+        limit: 50,
         cursor,
       });
 
       let found = false;
       // Search for the next object in the list
       for (const object of nextList.objects) {
-        lastSeen = object.key;
         if (!objectExistsInPath(lastSeen)) {
           found = true;
           break;
         }
+
+        lastSeen = object.key;
       }
 
       if (found) break;
@@ -239,22 +253,47 @@ export class R2Registry implements Registry {
       }
     }
 
-    if (cursor === undefined) {
-      lastSeen = undefined;
-    }
-
     return {
-      repositories: Object.keys(repositories),
+      repositories: repositoriesOrder,
       cursor: lastSeen,
     };
   }
 
+  async verifyManifest(name: string, manifest: ManifestSchema) {
+    const layers = [...manifest.layers, manifest.config];
+    for (const key of layers) {
+      const res = await this.env.REGISTRY.head(`${name}/blobs/${key.digest}`);
+      if (res === null) {
+        console.error(`Digest ${key} doesn't exist`);
+        return new ManifestError("BLOB_UNKNOWN", `unknown blob ${key.digest}`);
+      }
+    }
+
+    return null;
+  }
+
   async putManifest(
+    namespace: string,
+    reference: string,
+    readableStream: ReadableStream<any>,
+    contentType: string,
+  ): Promise<PutManifestResponse | RegistryError> {
+    const key = await this.gc.markForInsertion(namespace);
+    try {
+      return this.putManifestInner(namespace, reference, readableStream, contentType);
+    } finally {
+      // if this fails, at some point it will be expired
+      await this.gc.cleanInsertion(namespace, key);
+    }
+  }
+
+  async putManifestInner(
     name: string,
     reference: string,
     readableStream: ReadableStream<any>,
     contentType: string,
   ): Promise<PutManifestResponse | RegistryError> {
+    const gcMarker = await this.gc.getGCMarker(name);
     const env = this.env;
     const sha256 = new crypto.DigestStream("SHA-256");
     const reader = readableStream.getReader();
@@ -265,10 +304,19 @@ export class R2Registry implements Registry {
     const digest = await sha256.digest;
     const digestStr = hexToDigest(digest);
     const text = await blob.text();
+    const manifestJSON = JSON.parse(text);
+    const manifest = manifestSchema.parse(manifestJSON);
+    const verifyManifestErr = await this.verifyManifest(name, manifest);
+    if (verifyManifestErr !== null) return { response: verifyManifestErr };
+
+    if (!(await this.gc.checkCanInsertData(name, gcMarker))) {
+      console.error("Manifest can't be uploaded as there is/was a garbage collection going");
+      return { response: new ServerError("garbage collection is on-going... check with registry administrator", 500) };
+    }
+
     const putReference = async () => {
       // if the reference is the same as a digest, it's not necessary to insert
       if (reference === digestStr) return;
-      // TODO: If we're overriding an existing manifest here, should we update the original manifest references?
       return await env.REGISTRY.put(`${name}/manifests/${reference}`, text, {
         sha256: digest,
         httpMetadata: {
@@ -276,7 +324,8 @@ export class R2Registry implements Registry {
         },
       });
     };
-    await Promise.allSettled([
+
+    await Promise.all([
       putReference(),
       // this is the "main" manifest
       env.REGISTRY.put(`${name}/manifests/${digestStr}`, text, {
@@ -680,5 +729,10 @@ export class R2Registry implements Registry {
       digest: sha256,
       location: `/v2/${namespace}/blobs/${sha256}`,
     };
+  }
+
+  async garbageCollection(namespace: string, mode: GarbageCollectionMode): Promise<boolean> {
+    const result = await this.gc.collect({ name: namespace, mode: mode });
+    return result;
   }
 }

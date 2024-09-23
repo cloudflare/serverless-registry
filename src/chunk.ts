@@ -60,7 +60,6 @@ export function limit(streamInput: ReadableStream, limitBytes: number): Readable
     r.releaseLock();
     w.releaseLock();
     await stream.writable.close();
-    await stream.readable.cancel();
   })();
 
   return stream.readable;
