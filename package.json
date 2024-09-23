@@ -7,7 +7,7 @@
     "deploy": "wrangler publish",
     "dev:miniflare": "cross-env NODE_ENV=development wrangler --env dev dev --port 9999 --live-reload",
     "typecheck": "tsc",
-    "test": "vitest --config vitest.config.ts run"
+    "test": "vitest --config test/vitest.config.ts run"
   },
   "dependencies": {
     "@cfworker/base64url": "^1.12.5",

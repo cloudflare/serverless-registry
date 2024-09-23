@@ -1,15 +1,15 @@
 import { afterAll, describe, expect, test } from "vitest";
-import { SHA256_PREFIX_LEN, getSHA256 } from "./src/user";
-import { TagsList } from "./src/router";
-import { Env } from ".";
-import { RegistryTokens } from "./src/token";
-import { RegistryAuthProtocolTokenPayload } from "./src/auth";
-import { registries } from "./src/registry/registry";
-import { RegistryHTTPClient } from "./src/registry/http";
+import { SHA256_PREFIX_LEN, getSHA256 } from "../src/user";
+import { TagsList } from "../src/router";
+import { Env } from "..";
+import { RegistryTokens } from "../src/token";
+import { RegistryAuthProtocolTokenPayload } from "../src/auth";
+import { registries } from "../src/registry/registry";
+import { RegistryHTTPClient } from "../src/registry/http";
 import { encode } from "@cfworker/base64url";
-import { ManifestSchema } from "./src/manifest";
-import { limit } from "./src/chunk";
-import worker from "./index";
+import { ManifestSchema } from "../src/manifest";
+import { limit } from "../src/chunk";
+import worker from "../index";
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 
 async function generateManifest(name: string): Promise<ManifestSchema> {
