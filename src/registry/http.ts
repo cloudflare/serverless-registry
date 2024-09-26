@@ -69,6 +69,7 @@ function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string
   return new Request(urlReq, {
     method,
     body,
+    redirect: "follow",
     headers: ctxIntoHeaders(ctx),
   });
 }
@@ -225,7 +226,7 @@ export class RegistryHTTPClient implements Registry {
       grant_type: "password",
       password: this.password(),
     });
-    let res = await fetch(ctx.realm, {
+    let response = await fetch(ctx.realm, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Docker-Client/24.0.5 (linux)",
@@ -233,21 +234,26 @@ export class RegistryHTTPClient implements Registry {
       method: "POST",
       body: params.toString(),
     });
-    if (res.status === 404 || res.status === 405) {
+    if (response.status === 404 || response.status === 405 || response.status == 401) {
       console.debug(
         this.url.toString(),
-        "Oauth 404/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
+        "Oauth 404/401/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
       );
-      res = await this.authenticateBearerSimple(ctx, params);
+      const responseSimple = await this.authenticateBearerSimple(ctx, params);
+      if (responseSimple.ok) {
+        response = responseSimple;
+      } else {
+        console.error(`Oauth fallback also failed: ${responseSimple.status} ${await responseSimple.text()}`);
+      }
     }
 
-    if (!res.ok) {
+    if (!response.ok) {
       throw new Error(
-        `unexpected ${res.status} from ${this.url.toString()} when Oauth authenticating: ${await res.text()}`,
+        `unexpected ${response.status} from ${this.url.toString()} when Oauth authenticating: ${await response.text()}`,
       );
     }
 
-    const t = await res.text();
+    const t = await response.text();
     try {
       const response: {
         access_token?: string;
@@ -279,7 +285,7 @@ export class RegistryHTTPClient implements Registry {
         errorString(err),
         t.slice(0, Math.min(t.length, 100)),
         "status",
-        res.status,
+        response.status,
       );
       throw err;
     }
@@ -404,11 +410,26 @@ export class RegistryHTTPClient implements Registry {
   async getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError> {
     try {
       const ctx = await this.authenticate();
-      const res = await fetch(ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`));
+      const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
+      let res = await fetch(req);
       if (!res.ok) {
-        return {
-          response: res,
-        };
+        // This means we got a redirect, so let's try again this URL but
+        // without any headers. Services like S3 reject authorization headers altogether
+        // if the authentication is included in the URL.
+        if (res.url !== req.url) {
+          const redirectResponse = await fetch(new Request(res.url));
+          if (!redirectResponse.ok) {
+            return {
+              response: res,
+            };
+          }
+
+          res = redirectResponse;
+        } else {
+          return {
+            response: res,
+          };
+        }
       }
 
       if (res.body === null) {
