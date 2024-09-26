@@ -4,7 +4,7 @@
   "description": "An open-source R2 registry",
   "main": "index.ts",
   "scripts": {
-    "deploy": "wrangler publish",
+    "deploy": "wrangler deploy",
     "dev:miniflare": "cross-env NODE_ENV=development wrangler --env dev dev --port 9999 --live-reload",
     "typecheck": "tsc",
     "test": "vitest --config test/vitest.config.ts run"
