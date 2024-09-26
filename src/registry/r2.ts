@@ -260,12 +260,28 @@ export class R2Registry implements Registry {
   }
 
   async verifyManifest(name: string, manifest: ManifestSchema) {
-    const layers = [...manifest.layers, manifest.config];
+    if (manifest.schemaVersion === 2 && "manifests" in manifest) {
+      for (const manifestElement of manifest.manifests) {
+        const key = manifestElement.digest;
+        const res = await this.env.REGISTRY.head(`${name}/manifests/${key}`);
+        if (res === null) {
+          console.error(`Manifest with digest ${key} doesn't exist`);
+          return new ManifestError("BLOB_UNKNOWN", `unknown manifest ${key}`);
+        }
+      }
+
+      return null;
+    }
+
+    const layers: string[] =
+      manifest.schemaVersion === 1
+        ? manifest.fsLayers.map((layer) => layer.blobSum)
+        : [...manifest.layers.map((layer) => layer.digest), manifest.config.digest];
     for (const key of layers) {
-      const res = await this.env.REGISTRY.head(`${name}/blobs/${key.digest}`);
+      const res = await this.env.REGISTRY.head(`${name}/blobs/${key}`);
       if (res === null) {
         console.error(`Digest ${key} doesn't exist`);
-        return new ManifestError("BLOB_UNKNOWN", `unknown blob ${key.digest}`);
+        return new ManifestError("BLOB_UNKNOWN", `unknown blob ${key}`);
       }
     }
 

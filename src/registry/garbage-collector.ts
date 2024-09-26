@@ -196,9 +196,20 @@ export class GarbageCollector {
       }
 
       const manifestData = (await manifest.json()) as ManifestSchema;
-      manifestData.layers.forEach((layer) => {
-        referencedBlobs.add(layer.digest);
-      });
+      // TODO: garbage collect manifests.
+      if ("manifests" in manifestData) {
+        return true;
+      }
+
+      if (manifestData.schemaVersion === 1) {
+        manifestData.fsLayers.forEach((layer) => {
+          referencedBlobs.add(layer.blobSum);
+        });
+      } else {
+        manifestData.layers.forEach((layer) => {
+          referencedBlobs.add(layer.digest);
+        });
+      }
 
       return true;
     });

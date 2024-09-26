@@ -12,7 +12,7 @@ import { limit } from "../src/chunk";
 import worker from "../index";
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 
-async function generateManifest(name: string): Promise<ManifestSchema> {
+async function generateManifest(name: string, schemaVersion: 1 | 2 = 2): Promise<ManifestSchema> {
   const data = "bla";
   const sha256 = await getSHA256(data);
   const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
@@ -23,12 +23,21 @@ async function generateManifest(name: string): Promise<ManifestSchema> {
   expect(res2.ok).toBeTruthy();
   const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
   expect(last.ok).toBeTruthy();
-  return {
-    schemaVersion: 2,
-    layers: [{ size: data.length, digest: sha256, mediaType: "shouldbeanything" }],
-    config: { size: data.length, digest: sha256, mediaType: "configmediatypeshouldntbechecked" },
-    mediaType: "shouldalsobeanythingforretrocompatibility",
-  };
+  return schemaVersion === 1
+    ? {
+        schemaVersion,
+        fsLayers: [{ blobSum: sha256 }],
+        architecture: "amd64",
+      }
+    : {
+        schemaVersion,
+        layers: [
+          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
+          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
+        ],
+        config: { size: data.length, digest: sha256, mediaType: "configmediatypeshouldntbechecked" },
+        mediaType: "shouldalsobeanythingforretrocompatibility",
+      };
 }
 
 function createRequest(method: string, path: string, body: ReadableStream | null, headers = {}) {
@@ -489,7 +498,50 @@ describe("push and catalog", () => {
       "hello",
       "hello-2",
       "latest",
-      "sha256:e8f14a06f5e206931feb6761a6022231c98917edeb9d7f44c88f075113656374",
+      "sha256:a8a29b609fa044cf3ee9a79b57a6fbfb59039c3e9c4f38a57ecb76238bf0dec6",
+    ]);
+
+    const repositoryBuildUp: string[] = [];
+    let currentPath = "/v2/_catalog?n=1";
+    for (let i = 0; i < 3; i++) {
+      const response = await fetch(createRequest("GET", currentPath, null));
+      expect(response.ok).toBeTruthy();
+      const body = (await response.json()) as { repositories: string[] };
+      if (body.repositories.length === 0) {
+        break;
+      }
+      expect(body.repositories).toHaveLength(1);
+
+      repositoryBuildUp.push(...body.repositories);
+      const url = new URL(response.headers.get("Link")!.split(";")[0].trim());
+      currentPath = url.pathname + url.search;
+    }
+
+    expect(repositoryBuildUp).toEqual(expectedRepositories);
+  });
+
+  test("(v1) push and then use the catalog", async () => {
+    await createManifest("hello-world-main", await generateManifest("hello-world-main", 1), "hello");
+    await createManifest("hello-world-main", await generateManifest("hello-world-main", 1), "latest");
+    await createManifest("hello-world-main", await generateManifest("hello-world-main", 1), "hello-2");
+    await createManifest("hello", await generateManifest("hello", 1), "hello");
+    await createManifest("hello/hello", await generateManifest("hello/hello", 1), "hello");
+
+    const response = await fetch(createRequest("GET", "/v2/_catalog", null));
+    expect(response.ok).toBeTruthy();
+    const body = (await response.json()) as { repositories: string[] };
+    expect(body).toEqual({
+      repositories: ["hello-world-main", "hello/hello", "hello"],
+    });
+    const expectedRepositories = body.repositories;
+    const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
+    const tags = (await tagsRes.json()) as TagsList;
+    expect(tags.name).toEqual("hello-world-main");
+    expect(tags.tags).toEqual([
+      "hello",
+      "hello-2",
+      "latest",
+      "sha256:a70525d2dd357c6ece8d9e0a5a232e34ca3bbceaa1584d8929cdbbfc81238210",
     ]);
 
     const repositoryBuildUp: string[] = [];
