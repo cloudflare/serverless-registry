@@ -1,0 +1,17 @@
+{
+  "name": "push",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/tar-fs": "^2.0.4",
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "p-limit": "^6.1.0",
+    "tar-fs": "^3.0.6"
+  }
+}

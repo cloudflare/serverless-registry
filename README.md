@@ -115,7 +115,8 @@ the target registry and setup the credentials.
 Right now there is some limitations with this container registry.
 
 - Pushing with docker is limited to images that have layers of maximum size 500MB. Refer to maximum request body sizes in your Workers plan.
-- To circumvent that limitation, you can manually add the layer and the manifest into the R2 bucket or use a client that is able to chunk uploads in sizes less than 500MB (or the limit that you have in your Workers plan).
+- To circumvent that limitation, you can either manually interact with the R2 bucket to upload the layer or take a
+  peek at the `./push` folder for some inspiration on how can you push big layers.
 - If you use `npx wrangler dev` and push to the R2 registry with docker, the R2 registry will have to buffer the request on the Worker.
 
 ## License
