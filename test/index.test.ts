@@ -31,7 +31,10 @@ async function generateManifest(name: string, schemaVersion: 1 | 2 = 2): Promise
       }
     : {
         schemaVersion,
-        layers: [{ size: data.length, digest: sha256, mediaType: "shouldbeanything" }],
+        layers: [
+          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
+          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
+        ],
         config: { size: data.length, digest: sha256, mediaType: "configmediatypeshouldntbechecked" },
         mediaType: "shouldalsobeanythingforretrocompatibility",
       };
@@ -495,7 +498,7 @@ describe("push and catalog", () => {
       "hello",
       "hello-2",
       "latest",
-      "sha256:e8f14a06f5e206931feb6761a6022231c98917edeb9d7f44c88f075113656374",
+      "sha256:a8a29b609fa044cf3ee9a79b57a6fbfb59039c3e9c4f38a57ecb76238bf0dec6",
     ]);
 
     const repositoryBuildUp: string[] = [];

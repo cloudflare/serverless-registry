@@ -40,6 +40,26 @@ export const manifestSchema = z
         signatures: z.array(z.unknown()).optional(),
       })
       .and(z.record(z.unknown())),
+  )
+  .or(
+    z.object({
+      schemaVersion: z.literal(2),
+      mediaType: z.string(),
+      manifests: z.array(
+        z.object({
+          mediaType: z.string(),
+          platform: z.object({
+            "architecture": z.string(),
+            "os": z.string(),
+            "os.version": z.string().optional(),
+            "variant": z.string().optional(),
+            "features": z.array(z.string()).optional(),
+          }),
+          digest: z.string(),
+          size: z.number().int(),
+        }),
+      ),
+    }),
   );
 
 export type ManifestSchema = z.infer<typeof manifestSchema>;
