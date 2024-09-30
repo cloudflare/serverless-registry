@@ -19,6 +19,8 @@ export interface Env {
   JWT_REGISTRY_TOKENS_PUBLIC_KEY?: string;
   USERNAME?: string;
   PASSWORD?: string;
+  READONLY_USERNAME?: string;
+  READONLY_PASSWORD?: string;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;

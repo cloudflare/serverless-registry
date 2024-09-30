@@ -268,24 +268,21 @@ describe("v2 manifests", () => {
 
 describe("tokens", async () => {
   test("auth payload push on /v2", async () => {
-    const auth = new RegistryTokens({} as JsonWebKey);
-    const { verified } = auth.verifyPayload(createRequest("GET", "/v2/", null), {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("GET", "/v2/", null), {
       capabilities: ["push"],
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeTruthy();
   });
 
   test("auth payload pull on /v2", async () => {
-    const auth = new RegistryTokens({} as JsonWebKey);
-    const { verified } = auth.verifyPayload(createRequest("GET", "/v2/", null), {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("GET", "/v2/", null), {
       capabilities: ["pull"],
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeTruthy();
   });
 
   test("auth payload push on /v2/whatever with HEAD", async () => {
-    const auth = new RegistryTokens({} as JsonWebKey);
-    const { verified } = auth.verifyPayload(createRequest("HEAD", "/v2/whatever", null), {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("HEAD", "/v2/whatever", null), {
       capabilities: ["push"],
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeTruthy();
@@ -293,8 +290,7 @@ describe("tokens", async () => {
 
   test("auth payload push on /v2/whatever with mutations", async () => {
     for (const mutationMethod of ["PATCH", "POST", "DELETE"]) {
-      const auth = new RegistryTokens({} as JsonWebKey);
-      const { verified } = auth.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
+      const { verified } = RegistryTokens.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
         capabilities: ["push"],
       } as RegistryAuthProtocolTokenPayload);
       expect(verified).toBeTruthy();
@@ -303,8 +299,7 @@ describe("tokens", async () => {
 
   test("auth payload pull on /v2/whatever with mutations", async () => {
     for (const mutationMethod of ["PATCH", "POST", "DELETE"]) {
-      const auth = new RegistryTokens({} as JsonWebKey);
-      const { verified } = auth.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
+      const { verified } = RegistryTokens.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
         capabilities: ["pull"],
       } as RegistryAuthProtocolTokenPayload);
       expect(verified).toBeFalsy();
@@ -313,8 +308,7 @@ describe("tokens", async () => {
 
   test("auth payload push/pull on /v2/whatever with mutations", async () => {
     for (const mutationMethod of ["PATCH", "POST", "DELETE"]) {
-      const auth = new RegistryTokens({} as JsonWebKey);
-      const { verified } = auth.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
+      const { verified } = RegistryTokens.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
         capabilities: ["pull", "push"],
       } as RegistryAuthProtocolTokenPayload);
       expect(verified).toBeTruthy();
@@ -322,16 +316,14 @@ describe("tokens", async () => {
   });
 
   test("auth payload push on GET", async () => {
-    const auth = new RegistryTokens({} as JsonWebKey);
-    const { verified } = auth.verifyPayload(createRequest("GET", "/v2/whatever", null), {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("GET", "/v2/whatever", null), {
       capabilities: ["push"],
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeFalsy();
   });
 
   test("auth payload push/pull on GET", async () => {
-    const auth = new RegistryTokens({} as JsonWebKey);
-    const { verified } = auth.verifyPayload(createRequest("GET", "/v2/whatever", null), {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("GET", "/v2/whatever", null), {
       capabilities: ["push", "pull"],
     } as RegistryAuthProtocolTokenPayload);
     expect(verified).toBeTruthy();
