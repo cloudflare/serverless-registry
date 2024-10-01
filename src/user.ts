@@ -1,5 +1,7 @@
 import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePasswordFromHeader } from "./auth";
 import { errorString } from "./utils";
+import { RegistryTokens } from "./token";
+import type { RegistryTokenCapability } from "./auth";
 
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
@@ -26,9 +28,15 @@ export async function getSHA256(data: string, prefix: string = SHA256_PREFIX + "
   return hexToDigest(await sha256.digest, prefix);
 }
 
+export type AuthenticatorCredentials = {
+  username: string;
+  password: string;
+  capabilities: RegistryTokenCapability[];
+};
+
 export class UserAuthenticator implements Authenticator {
   authmode: string;
-  constructor(private username: string, private password: string) {
+  constructor(private credentials: AuthenticatorCredentials[]) {
     this.authmode = "UserAuthenticator";
   }
 
@@ -39,16 +47,18 @@ export class UserAuthenticator implements Authenticator {
     }
 
     const [username, password] = res;
-    if (username !== this.username) {
+
+    const credential = this.credentials.find((c) => c.username === username);
+    if (!credential) {
       return { verified: false, payload: null };
     }
 
     try {
-      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(username), stringToArrayBuffer(this.username))) {
+      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(username), stringToArrayBuffer(credential.username))) {
         return { verified: false, payload: null };
       }
 
-      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(password), stringToArrayBuffer(this.password))) {
+      if (!crypto.subtle.timingSafeEqual(stringToArrayBuffer(password), stringToArrayBuffer(credential.password))) {
         return { verified: false, payload: null };
       }
     } catch (err) {
@@ -56,14 +66,13 @@ export class UserAuthenticator implements Authenticator {
       return { verified: false, payload: null };
     }
 
-    return {
-      verified: true,
-      payload: {
-        username,
-        capabilities: ["pull", "push"],
-        exp: Date.now() + 60 * 60,
-        aud: "",
-      },
+    const payload = {
+      username,
+      capabilities: credential.capabilities,
+      exp: Date.now() + 60 * 60,
+      aud: "",
     };
+
+    return RegistryTokens.verifyPayload(r, payload);
   }
 }

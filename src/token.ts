@@ -74,7 +74,7 @@ export class RegistryTokens implements Authenticator {
     return token;
   }
 
-  checkIfV2OnlyPath(request: Request): boolean {
+  static checkIfV2OnlyPath(request: Request): boolean {
     return request.url.endsWith("/v2/");
   }
 
@@ -95,7 +95,7 @@ export class RegistryTokens implements Authenticator {
       // the JWT signature is valid, decode it now
       const decoded = jwt.decode(token);
       const payload = decoded.payload as RegistryAuthProtocolTokenPayload;
-      return this.verifyPayload(request, payload);
+      return RegistryTokens.verifyPayload(request, payload);
     } catch (error) {
       // If the verification fails (e.g., due to token expiration or signature mismatch),
       // jwt.verify() will throw an error which we can catch here.
@@ -107,7 +107,7 @@ export class RegistryTokens implements Authenticator {
     }
   }
 
-  verifyPayload(request: Request, payload: RegistryAuthProtocolTokenPayload) {
+  static verifyPayload(request: Request, payload: RegistryAuthProtocolTokenPayload) {
     // Check if token has expired
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && now >= payload.exp) {

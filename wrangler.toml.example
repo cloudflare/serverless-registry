@@ -15,7 +15,7 @@ r2_buckets = [
 JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 
 # Secrets:
-# USERNAME/PASSWORD if you want username/password based auth
+# USERNAME/PASSWORD/READONLY_USERNAME/READONLY_PASSWORD if you want username/password based auth
 
 
 ## Dev - For local dev using `npx wrangler dev`
@@ -25,6 +25,8 @@ r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
 # REGISTRIES_JSON = "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]"
 USERNAME = "hello"
 PASSWORD = "world"
+# READONLY_USERNAME = "readonly"
+# READONLY_PASSWORD = "readonly"
 # The necessary secrets are:
 # Setup those secrets on .dev.vars in the root of the project
 #
