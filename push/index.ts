@@ -38,8 +38,7 @@ if (image === undefined) {
 // Check if the image has already been saved from Docker
 
 console.log("Preparing image...");
-let imageMetadata: { ID: string };
-const imageMetadataRes = await $`docker images --format json ${image}`.quiet();
+const imageMetadataRes = await $`docker images --format "{{ .ID }}" ${image}`.quiet();
 if (imageMetadataRes.exitCode !== 0) {
   console.error(
     "Image",
@@ -49,14 +48,13 @@ if (imageMetadataRes.exitCode !== 0) {
   process.exit(1);
 }
 
-const imageMetadataText = imageMetadataRes.text();
-if (imageMetadataText === "") {
+const imageID = imageMetadataRes.text();
+if (imageID === "") {
   console.error("Image", image, "doesn't exist. Check your existing images with\n\n\tdocker images");
   process.exit(1);
 }
 
-imageMetadata = JSON.parse(imageMetadataText);
-const tarFile = imageMetadata.ID + ".tar";
+const tarFile = imageID + ".tar";
 const imagePath = ".output-image";
 if (!(await file(tarFile).exists())) {
   const output = await $`docker save ${image} --output ${tarFile}`;
@@ -249,7 +247,7 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
     );
   }
 
-  const maxChunkLength = +(createUploadResponse.headers.get("oci-chunk-max-length") ?? 500 * 1024 * 1024);
+  const maxChunkLength = +(createUploadResponse.headers.get("oci-chunk-max-length") ?? 100 * 1024 * 1024);
   if (isNaN(maxChunkLength)) {
     throw new Error(`oci-chunk-max-length header is malformed (not a number)`);
   }
@@ -332,7 +330,7 @@ for (const compressedDigest of compressedDigests) {
     size: layer.size,
     digest: `sha256:${compressedDigest}`,
   } as const);
-  tasks.push(
+  pushTasks.push(
     pool(async () => {
       const maxRetries = +(process.env["MAX_RETRIES"] ?? 3);
       if (isNaN(maxRetries)) throw new Error("MAX_RETRIES is not a number");
@@ -369,7 +367,9 @@ pushTasks.push(
 
 const promises = await Promise.allSettled(pushTasks);
 for (const promise of promises) {
-  if (promise.status === "rejected") process.exit(1);
+  if (promise.status === "rejected") {
+    throw promise.reason;
+  }
 }
 
 const manifestObject = {
