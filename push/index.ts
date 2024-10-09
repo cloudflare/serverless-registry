@@ -54,7 +54,7 @@ if (imageID === "") {
   process.exit(1);
 }
 
-const tarFile = imageID + ".tar";
+const tarFile = imageID.trim() + ".tar";
 const imagePath = ".output-image";
 if (!(await file(tarFile).exists())) {
   const output = await $`docker save ${image} --output ${tarFile}`;
@@ -119,7 +119,7 @@ await mkdir(cacheFolder, { recursive: true });
 const [manifest] = manifests;
 const tasks = [];
 
-console.log("compressing...");
+console.log("Compressing...");
 // Iterate through every layer, read it and compress to a file
 for (const layer of manifest.Layers) {
   tasks.push(
@@ -142,18 +142,17 @@ for (const layer of manifest.Layers) {
       }
 
       const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
-
       await rm(inprogressPath, { recursive: true });
-      const layerCacheGzip = file(inprogressPath, {});
-
+      const layerCacheGzip = file(inprogressPath);
       const cacheWriter = layerCacheGzip.writer();
       const hasher = new Bun.CryptoHasher("sha256");
+
       const gzipStream = zlib.createGzip({ level: 9 });
       gzipStream.pipe(
         new stream.Writable({
-          write(value, _, callback) {
-            hasher.update(value);
-            cacheWriter.write(value);
+          write(value: Buffer, _, callback) {
+            cacheWriter.write(value.buffer);
+            hasher.update(value.buffer);
             callback();
           },
         }),
@@ -165,7 +164,7 @@ for (const layer of manifest.Layers) {
           new WritableStream({
             write(value) {
               return new Promise((res, rej) => {
-                gzipStream.write(value, "binary", (err) => {
+                gzipStream.write(value, (err) => {
                   if (err) {
                     rej(err);
                     return;
@@ -175,12 +174,21 @@ for (const layer of manifest.Layers) {
               });
             },
             close() {
-              gzipStream.end();
+              return new Promise((res) => {
+                gzipStream.end(() => {
+                  res();
+                });
+              });
             },
           }),
         );
 
-      await cacheWriter.flush();
+      await new Promise((res) =>
+        gzipStream.flush(() => {
+          res(true);
+        }),
+      );
+
       await cacheWriter.end();
       const digest = hasher.digest("hex");
       await rename(inprogressPath, path.join(cacheFolder, digest));
@@ -258,8 +266,15 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
     throw new Error("Docker-Upload-UUID not defined in headers");
   }
 
+  function parseLocation(location: string) {
+    if (location.startsWith("/")) {
+      return `${proto}://${imageHost}${location}`;
+    }
+
+    return location;
+  }
+
   let location = createUploadResponse.headers.get("location") ?? `/v2${imageRepositoryPath}/blobs/uploads/${uploadId}`;
-  const putChunkUploadURL = `${proto}://${imageHost}${location}`;
   const maxToWrite = Math.min(maxChunkLength, totalLayerSize);
   let end = Math.min(maxChunkLength, totalLayerSize);
   let written = 0;
@@ -268,10 +283,10 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
   while (totalLayerSizeLeft > 0) {
     const range = `0-${Math.min(end, totalLayerSize) - 1}`;
     const current = new ReadableLimiter(reader as ReadableStreamDefaultReader, maxToWrite, previousReadable);
-
+    const patchChunkUploadURL = parseLocation(location);
     // we have to do fetchNode because Bun doesn't allow setting custom Content-Length.
     // https://github.com/oven-sh/bun/issues/10507
-    const putChunkResult = await fetchNode(putChunkUploadURL, {
+    const patchChunkResult = await fetchNode(patchChunkUploadURL, {
       method: "PATCH",
       body: current,
       headers: new Headers({
@@ -280,13 +295,13 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
         "content-length": `${Math.min(totalLayerSizeLeft, maxToWrite)}`,
       }),
     });
-    if (!putChunkResult.ok) {
+    if (!patchChunkResult.ok) {
       throw new Error(
-        `uploading chunk ${putChunkUploadURL} returned ${putChunkResult.status}: ${await putChunkResult.text()}`,
+        `uploading chunk ${patchChunkUploadURL} returned ${patchChunkResult.status}: ${await patchChunkResult.text()}`,
       );
     }
 
-    const rangeResponse = putChunkResult.headers.get("range");
+    const rangeResponse = patchChunkResult.headers.get("range");
     if (rangeResponse !== range) {
       throw new Error(`unexpected Range header ${rangeResponse}, expected ${range}`);
     }
@@ -295,14 +310,13 @@ async function pushLayer(layerDigest: string, readableStream: ReadableStream, to
     totalLayerSizeLeft -= previousReadable.written;
     written += previousReadable.written;
     end += previousReadable.written;
-    location = putChunkResult.headers.get("location") ?? location;
+    location = patchChunkResult.headers.get("location") ?? location;
     if (totalLayerSizeLeft != 0) console.log(layerDigest + ":", totalLayerSizeLeft, "upload bytes left.");
   }
 
   const range = `0-${written - 1}`;
-  const uploadURL = new URL(`${proto}://${imageHost}${location}`);
+  const uploadURL = new URL(parseLocation(location));
   uploadURL.searchParams.append("digest", layerDigest);
-
   const response = await fetch(uploadURL.toString(), {
     method: "PUT",
     headers: new Headers({
