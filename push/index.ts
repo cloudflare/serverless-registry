@@ -77,8 +77,7 @@ if (!(await file(tarFile).exists())) {
                 rej(err);
                 return;
               }
-            });
-            extract.once("drain", () => {
+
               res();
             });
           });
@@ -143,53 +142,55 @@ for (const layer of manifest.Layers) {
 
       const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
       await rm(inprogressPath, { recursive: true });
-      const layerCacheGzip = file(inprogressPath);
-      const cacheWriter = layerCacheGzip.writer();
+
       const hasher = new Bun.CryptoHasher("sha256");
-
+      const cacheWriter = file(inprogressPath).writer();
       const gzipStream = zlib.createGzip({ level: 9 });
-      gzipStream.pipe(
-        new stream.Writable({
-          write(value: Buffer, _, callback) {
-            cacheWriter.write(value.buffer);
-            hasher.update(value.buffer);
-            callback();
-          },
-        }),
-      );
+      const writeStream = new stream.Writable({
+        write(val: Buffer, _, cb) {
+          hasher.update(val, "binary");
+          cacheWriter.write(val);
+          cb();
+        },
+      });
 
+      gzipStream.pipe(writeStream);
       await file(layerPath)
         .stream()
         .pipeTo(
           new WritableStream({
-            write(value) {
-              return new Promise((res, rej) => {
-                gzipStream.write(value, (err) => {
-                  if (err) {
-                    rej(err);
-                    return;
-                  }
-                  res();
-                });
+            write(value: Buffer) {
+              return new Promise(async (res) => {
+                const needsWriteBackoff = gzipStream.write(value);
+                // We need to back-off with the writes
+                if (!needsWriteBackoff) {
+                  const onDrain = () => {
+                    // Remove event listener when it finishes
+                    gzipStream.off("drain", onDrain);
+                    res();
+                  };
+
+                  gzipStream.on("drain", onDrain);
+                  return;
+                }
+
+                res();
               });
             },
             close() {
-              return new Promise((res) => {
-                gzipStream.end(() => {
-                  res();
-                });
+              return new Promise(async (res) => {
+                // Flush before end
+                await new Promise((resFlush) => gzipStream.flush(() => resFlush(true)));
+                // End the stream
+                gzipStream.end(res);
               });
             },
           }),
         );
 
-      await new Promise((res) =>
-        gzipStream.flush(() => {
-          res(true);
-        }),
-      );
+      // Wait until the gzipStream has finished all the piping
+      await new Promise((res) => gzipStream.on("end", () => res(true)));
 
-      await cacheWriter.end();
       const digest = hasher.digest("hex");
       await rename(inprogressPath, path.join(cacheFolder, digest));
       await write(layerCachePath, digest);
