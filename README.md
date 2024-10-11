@@ -86,7 +86,7 @@ It supports both Basic and Bearer authentications as explained in the
 In the wrangler.toml file:
 
 ```
-[env.production]
+[env.production.vars]
 REGISTRIES_JSON = "[{ \"registry\": \"https://url-to-other-registry\", \"password_env\": \"REGISTRY_TOKEN\", \"username\": \"username-to-use\" }]"
 ```
 
