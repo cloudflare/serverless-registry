@@ -77,7 +77,8 @@ if (!(await file(tarFile).exists())) {
                 rej(err);
                 return;
               }
-
+            });
+            extract.once("drain", () => {
               res();
             });
           });
