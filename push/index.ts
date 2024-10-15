@@ -1,7 +1,8 @@
 import { $, CryptoHasher, file, write } from "bun";
-import tar from "tar-fs";
+import { extract } from "tar";
 
 import stream from "node:stream";
+import { mkdir } from "node:fs/promises";
 
 const username = process.env["USERNAME_REGISTRY"];
 async function read(stream: stream.Readable): Promise<string> {
@@ -68,43 +69,11 @@ if (!(await file(tarFile).exists())) {
 
   console.log(`Image saved as ${tarFile}, extracting...`);
 
-  const extract = tar.extract(imagePath);
+  await mkdir(imagePath);
 
-  await new Promise((resolve, reject) => {
-    extract.on('finish', resolve);
-    extract.on('error', reject);
-  
-    Bun.file(tarFile)
-      .stream()
-      .pipeTo(
-        new WritableStream({
-          write(value) {
-            return new Promise((res, rej) => {
-              const needsWriteBackoff = extract.write(value, (err) => {
-                if (err) {
-                  rej(err);
-                  return;
-                }
-                res();
-              });
-              // We need to back-off with the writes
-              if (!needsWriteBackoff) {
-                const onDrain = () => {
-                  // Remove event listener when it finishes
-                  extract.off("drain", onDrain);
-                  res();
-                };
-  
-                extract.on("drain", onDrain);
-              }
-            });
-          },
-          close() {
-            extract.end();
-          },
-        }),
-      )
-      .catch(reject);
+  const result = await extract({
+    file: tarFile,
+    cwd: imagePath,
   });
 
   console.log(`Extracted to ${imagePath}`);
@@ -130,7 +99,7 @@ if (manifests.length > 1) {
 import plimit from "p-limit";
 const pool = plimit(5);
 import zlib from "node:zlib";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 
 const cacheFolder = ".cache";
 
