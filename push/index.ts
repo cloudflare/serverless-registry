@@ -54,6 +54,8 @@ if (imageID === "") {
   process.exit(1);
 }
 
+console.log(`Image ${image} found locally, saving to disk...`);
+
 const tarFile = imageID.trim() + ".tar";
 const imagePath = ".output-image";
 if (!(await file(tarFile).exists())) {
@@ -64,31 +66,49 @@ if (!(await file(tarFile).exists())) {
     process.exit(1);
   }
 
+  console.log(`Image saved as ${tarFile}, extracting...`);
+
   const extract = tar.extract(imagePath);
 
-  await Bun.file(tarFile)
-    .stream()
-    .pipeTo(
-      new WritableStream({
-        write(value) {
-          return new Promise((res, rej) => {
-            extract.write(value, (err) => {
-              if (err) {
-                rej(err);
-                return;
+  await new Promise((resolve, reject) => {
+    extract.on('finish', resolve);
+    extract.on('error', reject);
+  
+    Bun.file(tarFile)
+      .stream()
+      .pipeTo(
+        new WritableStream({
+          write(value) {
+            return new Promise((res, rej) => {
+              const needsWriteBackoff = extract.write(value, (err) => {
+                if (err) {
+                  rej(err);
+                  return;
+                }
+                res();
+              });
+              // We need to back-off with the writes
+              if (!needsWriteBackoff) {
+                const onDrain = () => {
+                  // Remove event listener when it finishes
+                  extract.off("drain", onDrain);
+                  res();
+                };
+  
+                extract.on("drain", onDrain);
               }
             });
-            extract.once("drain", () => {
-              res();
-            });
-          });
-        },
-        close() {
-          extract.end();
-        },
-      }),
-    );
-}
+          },
+          close() {
+            extract.end();
+          },
+        }),
+      )
+      .catch(reject);
+  });
+
+  console.log(`Extracted to ${imagePath}`);
+} 
 
 type DockerSaveConfigManifest = {
   Config: string;
