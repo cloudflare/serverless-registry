@@ -1,7 +1,8 @@
 import { $, CryptoHasher, file, write } from "bun";
-import tar from "tar-fs";
+import { extract } from "tar";
 
 import stream from "node:stream";
+import { mkdir } from "node:fs/promises";
 
 const username = process.env["USERNAME_REGISTRY"];
 async function read(stream: stream.Readable): Promise<string> {
@@ -54,6 +55,8 @@ if (imageID === "") {
   process.exit(1);
 }
 
+console.log(`Image ${image} found locally, saving to disk...`);
+
 const tarFile = imageID.trim() + ".tar";
 const imagePath = ".output-image";
 if (!(await file(tarFile).exists())) {
@@ -64,31 +67,17 @@ if (!(await file(tarFile).exists())) {
     process.exit(1);
   }
 
-  const extract = tar.extract(imagePath);
+  console.log(`Image saved as ${tarFile}, extracting...`);
 
-  await Bun.file(tarFile)
-    .stream()
-    .pipeTo(
-      new WritableStream({
-        write(value) {
-          return new Promise((res, rej) => {
-            extract.write(value, (err) => {
-              if (err) {
-                rej(err);
-                return;
-              }
-            });
-            extract.once("drain", () => {
-              res();
-            });
-          });
-        },
-        close() {
-          extract.end();
-        },
-      }),
-    );
-}
+  await mkdir(imagePath);
+
+  const result = await extract({
+    file: tarFile,
+    cwd: imagePath,
+  });
+
+  console.log(`Extracted to ${imagePath}`);
+} 
 
 type DockerSaveConfigManifest = {
   Config: string;
@@ -110,7 +99,7 @@ if (manifests.length > 1) {
 import plimit from "p-limit";
 const pool = plimit(5);
 import zlib from "node:zlib";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 
 const cacheFolder = ".cache";
 
