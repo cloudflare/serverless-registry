@@ -450,6 +450,7 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   );
 
   if (err) {
+    console.error("Error uploading", err);
     return new InternalError();
   }
 
