@@ -20,7 +20,7 @@ if (process.stdin.isTTY) {
     "You need to pass the password with a pipe operator \n\n\t'echo <YOURPASSWORD> | USERNAME_REGISTRY=... bun run index.ts'\n",
   );
 } else {
-  password = (await read(process.stdin)).trim();
+  password = process.env["REGISTRY_JWT_TOKEN"];
 }
 
 if (!username || !password) {
