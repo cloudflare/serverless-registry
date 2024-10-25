@@ -14,14 +14,7 @@ async function read(stream: stream.Readable): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-let password;
-if (process.stdin.isTTY) {
-  console.error(
-    "You need to pass the password with a pipe operator \n\n\t'echo <YOURPASSWORD> | USERNAME_REGISTRY=... bun run index.ts'\n",
-  );
-} else {
-  password = process.env["REGISTRY_JWT_TOKEN"];
-}
+let password = process.env["REGISTRY_JWT_TOKEN"]
 
 if (!username || !password) {
   console.error("Username or password not defined, push won't be able to authenticate with registry");
