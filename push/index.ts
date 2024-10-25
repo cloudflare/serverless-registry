@@ -29,7 +29,14 @@ if (image === undefined) {
   process.exit(1);
 }
 
-// Check if the image has already been saved from Docker
+const installBun = $`bun install`.quiet();
+if (installBun.exitCode !== 0) {
+  console.error(
+    "Could not install bun"
+  );
+  process.exit(1);
+}
+
 
 console.log("Preparing image...");
 const imageMetadataRes = await $`docker images --format "{{ .ID }}" ${image}`.quiet();
