@@ -29,10 +29,10 @@ if (image === undefined) {
   process.exit(1);
 }
 
-const installBun = $`bun install`.quiet();
+const installBun = await $`bun install`.quiet();
 if (installBun.exitCode !== 0) {
   console.error(
-    "Could not install bun"
+    "Could not install bun",
   );
   process.exit(1);
 }
