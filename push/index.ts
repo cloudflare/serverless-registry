@@ -39,7 +39,7 @@ if (installBun.exitCode !== 0) {
 
 
 console.log("Preparing image...");
-const imageMetadataRes = await $`docker images --format "{{ .ID }}" ${image}`.quiet();
+const imageMetadataRes = await $`docker images --format "{{ .ID }}" ${image}`;
 if (imageMetadataRes.exitCode !== 0) {
   console.error(
     "Image",
