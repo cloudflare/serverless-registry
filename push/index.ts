@@ -39,7 +39,7 @@ if (installBun.exitCode !== 0) {
 
 
 console.log("Preparing image...");
-const imageMetadataRes = await $`docker images --format "{{ .ID }}" ${image}`;
+const imageMetadataRes = await $`/usr/bin/docker images --format "{{ .ID }}" ${image}`;
 if (imageMetadataRes.exitCode !== 0) {
   console.error(
     "Image",
@@ -60,7 +60,7 @@ console.log(`Image ${image} found locally, saving to disk...`);
 const tarFile = imageID.trim() + ".tar";
 const imagePath = ".output-image";
 if (!(await file(tarFile).exists())) {
-  const output = await $`docker save ${image} --output ${tarFile}`;
+  const output = await $`/usr/bin/docker save ${image} --output ${tarFile}`;
 
   if (output.exitCode != 0) {
     console.error("Error saving image", image, output.text());
