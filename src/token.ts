@@ -13,6 +13,7 @@ export function importKeyFromBase64(key: string): JsonWebKey {
 }
 
 export async function newRegistryTokens(jwtPublicKey: string): Promise<RegistryTokens> {
+  console.log("jwt public key", jwtPublicKey)
   return new RegistryTokens(importKeyFromBase64(jwtPublicKey));
 }
 
