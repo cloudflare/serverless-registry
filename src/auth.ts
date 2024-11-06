@@ -6,6 +6,7 @@ export type RegistryAuthProtocolTokenPayload = {
   username: string;
   account_id?: string;
   capabilities: RegistryTokenCapability[];
+  imageName ?: string;
   exp: number;
   aud: string;
   iat?: number;
@@ -28,12 +29,11 @@ export function stripUsernamePasswordFromHeader(r: Request): [string, string] | 
     // missing authorization header
     // do not log this. the /v2/ sends this request without any credentials to do version checking
     // we do not want to remove /v2/ from the auth middleware as well
+    console.log("no authorization header")
     return { verified: false, payload: null };
   }
-
   // now check the Authorization scheme used in the request
   const [scheme, encoded] = authorization.split(" ");
-
   // we strictly assume that auth scheme can only be Basic
   if (!encoded || scheme !== "Basic") {
     console.warn("failed checkCredentials: Authorization doesn't include Basic scheme");
@@ -43,7 +43,6 @@ export function stripUsernamePasswordFromHeader(r: Request): [string, string] | 
   try {
     // Decodes the base64 value and performs unicode normalization.
     const decoded = decode(encoded);
-
     // The username & password are split by the first colon.
     //=> example: "username:password"
     const index = decoded.indexOf(":");
