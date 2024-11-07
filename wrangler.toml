@@ -10,6 +10,11 @@ r2_buckets = [
   { binding = "REGISTRY", bucket_name = "runpod-registry" }
 ]
 
+[env.development]
+r2_buckets = [
+  { binding = "REGISTRY", bucket_name = "runpod-registry" }
+]
+
 # Secrets:
 # USERNAME/PASSWORD/READONLY_USERNAME/READONLY_PASSWORD if you want username/password based auth
 
