@@ -466,6 +466,30 @@ describe("http client", () => {
 
     expect("exists" in res && res.exists).toBe(false);
   });
+
+  test("test manifest exists with readonly", async () => {
+    envBindings = { ...bindings };
+    envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
+    envBindings.PASSWORD = "";
+    envBindings.USERNAME = "";
+    envBindings.READONLY_PASSWORD = "world";
+    envBindings.READONLY_USERNAME = "hello";
+    envBindings.REGISTRIES_JSON = undefined;
+    global.fetch = async function (r: RequestInfo): Promise<Response> {
+      return fetch(new Request(r));
+    };
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://localhost",
+      password_env: "PASSWORD",
+      username: "hello",
+    });
+    const res = await client.manifestExists("namespace/hello", "latest");
+    if ("response" in res) {
+      expect(await res.response.json()).toEqual({ status: res.response.status });
+    }
+
+    expect("exists" in res && res.exists).toBe(false);
+  });
 });
 
 describe("push and catalog", () => {
