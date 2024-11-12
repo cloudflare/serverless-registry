@@ -96,13 +96,13 @@ pull fallback in.
 For example [gcr](https://cloud.google.com/artifact-registry/docs/reference/docker-api):
 
 ```
-cat ./registry-service-credentials.json | base64 | wrangler --env production secrets put REGISTRY_TOKEN
+cat ./registry-service-credentials.json | base64 | npx wrangler secret put REGISTRY_TOKEN --env production
 ```
 
 [Github](https://github.com/settings/tokens) for example uses a simple token that you can copy.
 
 ```
-echo $GITHUB_TOKEN | wrangler --env production secrets put REGISTRY_TOKEN
+echo $GITHUB_TOKEN | npx wrangler secret put REGISTRY_TOKEN --env production
 ```
 
 The trick is always looking for how you would login in Docker for
