@@ -337,7 +337,7 @@ for (const compressedDigest of compressedDigests) {
   } as const);
   pushTasks.push(
     pool(async () => {
-      const maxRetries = +(process.env["MAX_RETRIES"] ?? 3);
+      const maxRetries = +(process.env["MAX_RETRIES"] ?? 8);
       if (isNaN(maxRetries)) throw new Error("MAX_RETRIES is not a number");
 
       for (let i = 0; i < maxRetries; i++) {
