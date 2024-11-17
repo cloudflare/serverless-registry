@@ -135,13 +135,17 @@ export class RegistryTokens implements Authenticator {
         break;
       // PULL method
       case "GET":
+        if (this.checkIfV2OnlyPath(request)) {
+          return { verified: true, payload };
+        }
+
+        if (request.url == 'https://registry.runpod.net/' || request.url == 'https://registry.runpod.net') {
+          return { verified: true, payload }
+        }
+
         if (this.checkIfV2OnlyPath(request) && payload.capabilities.length === 0) {
           console.warn("verifyToken: failed jwt verification: missing any capabilities for GET request in /v2/");
           return { verified: false, payload: null };
-        }
-
-        if (this.checkIfV2OnlyPath(request)) {
-          return { verified: true, payload };
         }
 
         if (!payload.capabilities.includes("pull")) {

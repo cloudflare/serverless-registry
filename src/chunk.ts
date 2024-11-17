@@ -5,8 +5,8 @@ import { Chunk } from "./registry/r2";
 // 5MiB
 export const MINIMUM_CHUNK = 1024 * 1024 * 5;
 
-// 5GiB
-export const MAXIMUM_CHUNK = MINIMUM_CHUNK * 1024;
+// 15GiB
+export const MAXIMUM_CHUNK = MINIMUM_CHUNK * 1024 * 3;
 
 // 100MB
 export const MAXIMUM_CHUNK_UPLOAD_SIZE = 1000 * 1000 * 100;
