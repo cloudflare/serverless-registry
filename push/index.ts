@@ -76,15 +76,6 @@ if ((await file(tarFile).exists())) {
     cwd: imagePath,
   });
 
-  const imageMetadataRes = await $`ls -al`;
-  if (imageMetadataRes.exitCode !== 0) {
-    console.error(
-      "ls -al error",
-    );
-    process.exit(1);
-  }
-  console.log(imageMetadataRes.text())
-
   console.log(`Extracted to ${imagePath}`);
 } 
 
