@@ -58,7 +58,7 @@ if (installBun.exitCode !== 0) {
 console.log(`Image ${image} found locally, saving to disk...`);
 
 const tarFile = "output.tar"
-const imagePath = ".output-image";
+const imagePath = "output-image";
 if ((await file(tarFile).exists())) {
   // const output = await $`/usr/bin/docker save ${image} --output ${tarFile}`;
 
