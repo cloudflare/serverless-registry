@@ -57,9 +57,9 @@ if (imageID === "") {
 
 console.log(`Image ${image} found locally, saving to disk...`);
 
-const tarFile = "output.tar"
+const tarFile = imageID.trim() + ".tar";
 const imagePath = ".output-image";
-if ((await file(tarFile).exists())) {
+if (!(await file(tarFile).exists())) {
   const output = await $`/usr/bin/docker save ${image} --output ${tarFile}`;
 
   if (output.exitCode != 0) {
