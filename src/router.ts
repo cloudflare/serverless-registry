@@ -567,7 +567,7 @@ v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
 });
 
 v2Router.post("/:name+/gc", async (req, env: Env) => {
-  const { name, tag } = req.params;
+  const { name } = req.params;
 
   const mode = req.query.mode ?? "unreferenced";
   if (mode !== "unreferenced" && mode !== "untagged") {

@@ -313,8 +313,8 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async manifestExists(name: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
+    const namespace = name.includes("/") ? name : `library/${name}`;
     try {
-      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
       req.headers.append("Accept", manifestTypes.join(", "));
@@ -342,8 +342,8 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async getManifest(name: string, digest: string): Promise<GetManifestResponse | RegistryError> {
+    const namespace = name.includes("/") ? name : `library/${name}`;
     try {
-      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
       req.headers.append("Accept", manifestTypes.join(", "));
@@ -374,8 +374,8 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async layerExists(name: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
+    const namespace = name.includes("/") ? name : `library/${name}`;
     try {
-      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
       if (res.status === 404) {
@@ -414,8 +414,8 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async getLayer(name: string, digest: string): Promise<GetLayerResponse | RegistryError> {
+    const namespace = name.includes("/") ? name : `library/${name}`;
     try {
-      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
       let res = await fetch(req);
