@@ -312,8 +312,9 @@ export class RegistryHTTPClient implements Registry {
     };
   }
 
-  async manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
+  async manifestExists(name: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
     try {
+      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
       req.headers.append("Accept", manifestTypes.join(", "));
@@ -340,8 +341,9 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError> {
+  async getManifest(name: string, digest: string): Promise<GetManifestResponse | RegistryError> {
     try {
+      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
       req.headers.append("Accept", manifestTypes.join(", "));
@@ -371,8 +373,9 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
+  async layerExists(name: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
     try {
+      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
       if (res.status === 404) {
@@ -410,8 +413,9 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError> {
+  async getLayer(name: string, digest: string): Promise<GetLayerResponse | RegistryError> {
     try {
+      const namespace = name.includes("/") ? name : `library/${name}`;
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
       let res = await fetch(req);
