@@ -84,11 +84,13 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
     }
   }
 
+  const url = new URL(req.url);
   if (tags.truncated) {
+    url.searchParams.set("last", tags.truncated ? tags.cursor : "");
     return new Response(JSON.stringify(ManifestTagsListTooBigError), {
       status: 400,
       headers: {
-        "Link": `${req.url}/?last=${tags.truncated ? tags.cursor : ""}; rel=next`,
+        "Link": `${url.toString()}; rel=next`,
         "Content-Type": "application/json",
       },
     });
@@ -533,6 +535,9 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
   });
 
   const keys = tags.objects.map((object) => object.key.split("/").pop()!);
+  const url = new URL(req.url);
+  url.searchParams.set("n", `${n}`);
+  url.searchParams.set("last", keys.length ? keys[keys.length - 1] : "");
   return new Response(
     JSON.stringify({
       name,
@@ -542,7 +547,7 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Link": `${req.url}?n=${n}&last=${keys.length ? keys[keys.length - 1] : ""}; rel=next`,
+        "Link": `${url.toString()}; rel=next`,
       },
     },
   );
