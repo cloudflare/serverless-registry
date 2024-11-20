@@ -11,7 +11,7 @@ import {
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
 import { SHA256_PREFIX_LEN, getSHA256, hexToDigest } from "../user";
-import { readableToBlob, readerToBlob, wrap } from "../utils";
+import { errorString, readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
   CheckLayerResponse,
@@ -29,6 +29,7 @@ import {
 } from "./registry";
 import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
+import { DigestInvalid, RegistryResponseJSON } from "../v2-responses";
 
 export type Chunk =
   | {
@@ -691,12 +692,27 @@ export class R2Registry implements Registry {
       // TODO: Handle one last buffer here
       await upload.complete(state.parts);
       const obj = await this.env.REGISTRY.get(uuid);
-      const put = this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, obj!.body, {
-        sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
-      });
+      if (!obj) throw new Error("internal error, upload not found just after completing");
+      if (obj.size >= 2 * 1000 * 1000) {
+        const digestStream = new crypto.DigestStream("SHA-256");
+        await obj.body.pipeTo(digestStream);
+        const digestHex = await digestStream.digest;
+        const digest = hexToDigest(digestHex);
+        if (digest !== expectedSha) {
+          return { response: new RegistryResponseJSON(JSON.stringify(DigestInvalid(expectedSha, digest))) };
+        }
+      } else {
+        const put = this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, obj!.body, {
+          sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
+        });
 
-      await put;
-      await this.env.REGISTRY.delete(uuid);
+        const [, err] = await wrap<unknown, Error>(put);
+        if (err !== null) {
+          return { response: handleR2PutError(expectedSha, err) };
+        }
+
+        await this.env.REGISTRY.delete(uuid);
+      }
     }
 
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
@@ -751,4 +767,29 @@ export class R2Registry implements Registry {
     const result = await this.gc.collect({ name: namespace, mode: mode });
     return result;
   }
+}
+
+function handleR2PutError(expectedSha: string, err: unknown): Response {
+  if (err instanceof Error) {
+    // this is very annoying, parsing the error message manually to know the error and retrieve the calculated hash...
+    if (
+      err instanceof Error &&
+      err.message.includes("The SHA-256 checksum you specified did not match what we received")
+    ) {
+      const actualHashWasMessage = "Actual SHA-256 was: ";
+      const digestIndex = err.message.indexOf(actualHashWasMessage);
+      const errorCodeIndex = err.message.indexOf(" (10037)");
+      let hash = "";
+      if (digestIndex !== -1 && errorCodeIndex !== -1 && digestIndex < errorCodeIndex) {
+        hash = "sha256:" + err.message.slice(actualHashWasMessage.length + digestIndex, errorCodeIndex);
+      }
+
+      return new RegistryResponseJSON(JSON.stringify(DigestInvalid(hash, expectedSha)), {
+        status: 400,
+      });
+    }
+  }
+
+  console.error(`There has been an internal error pushing ${expectedSha}: ${errorString(err)}`);
+  return new RegistryResponseJSON(JSON.stringify({ error: "INTERNAL_ERROR" }));
 }
