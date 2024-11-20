@@ -327,8 +327,9 @@ v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
 
 // this is the first thing that the client asks for in an upload
 v2Router.post("/:name+/blobs/uploads/", async (req, env: Env) => {
-  const { name } = req.params;
+   const { name } = req.params;
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(env.REGISTRY_CLIENT.startUpload(name));
+
   if (err) {
     return new InternalError();
   }
@@ -361,6 +362,7 @@ v2Router.get("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(
     env.REGISTRY_CLIENT.getUpload(name, uuid),
   );
+
   if (err) {
     return new InternalError();
   }
@@ -389,6 +391,7 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   const { name, uuid } = req.params;
   const contentRange = req.headers.get("Content-Range");
   const [start, end] = contentRange?.split("-") ?? [undefined, undefined];
+
   if (req.body == null) {
     return new Response(null, { status: 400 });
   }
@@ -516,6 +519,7 @@ export type TagsList = {
 
 v2Router.get("/:name+/tags/list", async (req, env: Env) => {
   const { name } = req.params;
+
   const { n: nStr = 50, last } = req.query;
   const n = +nStr;
   if (isNaN(n)) {
@@ -564,6 +568,7 @@ v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
 
 v2Router.post("/:name+/gc", async (req, env: Env) => {
   const { name } = req.params;
+
   const mode = req.query.mode ?? "unreferenced";
   if (mode !== "unreferenced" && mode !== "untagged") {
     throw new ServerError("Mode must be either 'unreferenced' or 'untagged'", 400);
