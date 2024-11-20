@@ -62,7 +62,8 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   // If somehow we need to remove by paginating, we accept a last query param
 
   const { last, limit } = req.query;
-  const { name, reference } = req.params;
+  const { reference } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   // Reference is ALWAYS a sha256
   const manifest = await env.REGISTRY.head(`${name}/manifests/${reference}`);
   if (manifest === null) {
@@ -105,7 +106,8 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
 });
 
 v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
-  const { name, reference } = req.params;
+  const { reference } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const res = await env.REGISTRY_CLIENT.manifestExists(name, reference);
   if ("exists" in res && res.exists) {
     return new Response(null, {
@@ -174,7 +176,8 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
 });
 
 v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: ExecutionContext) => {
-  const { name, reference } = req.params;
+  const { reference } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const res = await env.REGISTRY_CLIENT.getManifest(name, reference);
   if (!("response" in res)) {
     return new Response(res.stream, {
@@ -238,7 +241,8 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
     throw new ServerError("Content type not defined", 400);
   }
 
-  const { name, reference } = req.params;
+  const { reference } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const [res, err] = await wrap<PutManifestResponse | RegistryError, Error>(
     env.REGISTRY_CLIENT.putManifest(name, reference, req.body!, req.headers.get("Content-Type")!),
   );
@@ -261,7 +265,8 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
 });
 
 v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionContext) => {
-  const { name, digest } = req.params;
+  const { digest } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const res = await env.REGISTRY_CLIENT.getLayer(name, digest);
   if (!("response" in res)) {
     return new Response(res.stream, {
@@ -311,7 +316,8 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
 });
 
 v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
-  const { name, id } = req.params;
+  const { id } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const [res, err] = await wrap<true | RegistryError, Error>(env.REGISTRY_CLIENT.cancelUpload(name, id));
   if (err) {
     console.error("Error cancelling upload:", errorString(err));
@@ -327,8 +333,9 @@ v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
 
 // this is the first thing that the client asks for in an upload
 v2Router.post("/:name+/blobs/uploads/", async (req, env: Env) => {
-  const { name } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(env.REGISTRY_CLIENT.startUpload(name));
+  
   if (err) {
     return new InternalError();
   }
@@ -357,10 +364,12 @@ v2Router.post("/:name+/blobs/uploads/", async (req, env: Env) => {
 });
 
 v2Router.get("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
-  const { name, uuid } = req.params;
+  const { uuid } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(
     env.REGISTRY_CLIENT.getUpload(name, uuid),
   );
+  
   if (err) {
     return new InternalError();
   }
@@ -386,9 +395,11 @@ v2Router.get("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 });
 
 v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
-  const { name, uuid } = req.params;
+  const { uuid } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
   const contentRange = req.headers.get("Content-Range");
   const [start, end] = contentRange?.split("-") ?? [undefined, undefined];
+  
   if (req.body == null) {
     return new Response(null, { status: 400 });
   }
@@ -434,9 +445,10 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 });
 
 v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
-  const { name, uuid } = req.params;
+  const {  uuid } = req.params;
   const { digest } = req.query;
-
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
+  
   const url = new URL(req.url);
   const [res, err] = await wrap<FinishedUploadObject | RegistryError, Error>(
     env.REGISTRY_CLIENT.finishUpload(
@@ -468,8 +480,9 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 });
 
 v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
-  const { name, tag } = req.params;
-
+  const { tag } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
+  
   const res = await env.REGISTRY.head(`${name}/blobs/${tag}`);
   let layerExistsResponse: CheckLayerResponse | null = null;
   if (!res) {
@@ -515,7 +528,8 @@ export type TagsList = {
 };
 
 v2Router.get("/:name+/tags/list", async (req, env: Env) => {
-  const { name } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
+  
   const { n: nStr = 50, last } = req.query;
   const n = +nStr;
   if (isNaN(n)) {
@@ -545,8 +559,9 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
 });
 
 v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
-  const { name, digest } = req.params;
-
+  const { digest } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
+  
   const res = await env.REGISTRY.head(`${name}/blobs/${digest}`);
 
   if (!res) {
@@ -563,7 +578,8 @@ v2Router.delete("/:name+/blobs/:digest", async (req, env: Env) => {
 });
 
 v2Router.post("/:name+/gc", async (req, env: Env) => {
-  const { name } = req.params;
+  let  name  = req.params.name.includes('/') ? req.params.name : `library/${req.params.name}`;
+  
   const mode = req.query.mode ?? "unreferenced";
   if (mode !== "unreferenced" && mode !== "untagged") {
     throw new ServerError("Mode must be either 'unreferenced' or 'untagged'", 400);
