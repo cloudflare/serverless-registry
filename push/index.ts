@@ -77,7 +77,7 @@ if (!(await file(tarFile).exists())) {
   });
 
   console.log(`Extracted to ${imagePath}`);
-} 
+}
 
 type DockerSaveConfigManifest = {
   Config: string;

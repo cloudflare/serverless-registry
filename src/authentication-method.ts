@@ -19,7 +19,9 @@ export async function authenticationMethodFromEnv(env: Env) {
     return new UserAuthenticator(credentials);
   }
 
-  console.error("Either env.JWT_REGISTRY_TOKENS_PUBLIC_KEY must be set or both env.USERNAME, env.PASSWORD must be set or both env.READONLY_USERNAME, env.READONLY_PASSWORD must be set.");
+  console.error(
+    "Either env.JWT_REGISTRY_TOKENS_PUBLIC_KEY must be set or both env.USERNAME, env.PASSWORD must be set or both env.READONLY_USERNAME, env.READONLY_PASSWORD must be set.",
+  );
 
   // invalid configuration
   return undefined;

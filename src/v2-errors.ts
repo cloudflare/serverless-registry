@@ -9,7 +9,7 @@ export const ManifestUnknownError = (tag: string) =>
         },
       },
     ],
-  } as const);
+  }) as const;
 
 export const BlobUnknownError = {
   errors: [

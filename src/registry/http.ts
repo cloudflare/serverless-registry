@@ -64,7 +64,7 @@ function ctxIntoHeaders(ctx: HTTPContext): Headers {
 
 function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string, body?: BodyInit): Request {
   const urlReq = `${url.protocol}//${url.host}/v2${
-    (ctx.repository === "" || ctx.repository === "/") ? "/" : ctx.repository + "/"
+    ctx.repository === "" || ctx.repository === "/" ? "/" : ctx.repository + "/"
   }${path}`;
   return new Request(urlReq, {
     method,
@@ -141,7 +141,10 @@ function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): 
 export class RegistryHTTPClient implements Registry {
   private url: URL;
 
-  constructor(private env: Env, private configuration: RegistryConfiguration) {
+  constructor(
+    private env: Env,
+    private configuration: RegistryConfiguration,
+  ) {
     this.url = new URL(configuration.registry);
   }
 
@@ -236,7 +239,6 @@ export class RegistryHTTPClient implements Registry {
       body: params.toString(),
     });
     if (response.status === 404 || response.status === 405 || response.status == 401) {
-      
       console.debug(
         this.url.toString(),
         "Oauth 404/401/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
