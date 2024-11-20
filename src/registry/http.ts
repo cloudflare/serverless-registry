@@ -64,7 +64,7 @@ function ctxIntoHeaders(ctx: HTTPContext): Headers {
 
 function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string, body?: BodyInit): Request {
   const urlReq = `${url.protocol}//${url.host}/v2${
-    ctx.repository === "" ? "/" : ctx.repository + "/"
+    (ctx.repository === "" || ctx.repository === "/") ? "/" : ctx.repository + "/"
   }${path}`;
   return new Request(urlReq, {
     method,
