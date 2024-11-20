@@ -75,7 +75,6 @@ function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string
 }
 
 function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): AuthContext {
-  console.log("authHeaderIntoAuthContext", urlObject, authenticateHeader);
   const url = urlObject.toString();
   const parts = authenticateHeader.split(" ");
   if (parts.length === 0) {
