@@ -86,7 +86,7 @@ type DockerSaveConfigManifest = {
 }[];
 
 import path from "path";
-const manifests = (await Bun.file(path.join(imagePath, "manifest.json")).json()) as DockerSaveConfigManifest;
+const manifests = (await Bun.file(path.join(imagePath, "index.json")).json()) as DockerSaveConfigManifest;
 
 if (manifests.length == 0) {
   console.error("unexpected manifest of length 0");
