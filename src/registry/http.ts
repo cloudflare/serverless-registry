@@ -63,7 +63,7 @@ function ctxIntoHeaders(ctx: HTTPContext): Headers {
 }
 
 function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string, body?: BodyInit): Request {
-  const urlReq = `${url.protocol}//${ctx.authContext.service}/v2${
+  const urlReq = `${url.protocol}//${url.host}/v2${
     ctx.repository === "" ? "/" : ctx.repository + "/"
   }${path}`;
   return new Request(urlReq, {
@@ -75,6 +75,7 @@ function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string
 }
 
 function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): AuthContext {
+  console.log("authHeaderIntoAuthContext", urlObject, authenticateHeader);
   const url = urlObject.toString();
   const parts = authenticateHeader.split(" ");
   if (parts.length === 0) {
@@ -153,7 +154,7 @@ export class RegistryHTTPClient implements Registry {
     return (this.env as unknown as Record<string, string>)[this.configuration.password_env] ?? "";
   }
 
-  async authenticate(): Promise<HTTPContext> {
+  async authenticate(namespace: string): Promise<HTTPContext> {
     const res = await fetch(`${this.url.protocol}//${this.url.host}/v2/`, {
       headers: {
         "User-Agent": "Docker-Client/24.0.5 (linux)",
@@ -185,6 +186,7 @@ export class RegistryHTTPClient implements Registry {
     }
 
     const authCtx = authHeaderIntoAuthContext(this.url, authenticateHeader);
+    if (!authCtx.scope) authCtx.scope = namespace;
     switch (authCtx.authType) {
       case "bearer":
         return await this.authenticateBearer(authCtx);
@@ -221,7 +223,7 @@ export class RegistryHTTPClient implements Registry {
     const params = new URLSearchParams({
       service: ctx.service,
       // explicitely include that we don't want an offline_token.
-      scope: `repository:${this.url.pathname.slice(1)}/image:pull,push`,
+      scope: `repository:${ctx.scope}:pull,push`,
       client_id: "r2registry",
       grant_type: "password",
       password: this.password(),
@@ -235,6 +237,7 @@ export class RegistryHTTPClient implements Registry {
       body: params.toString(),
     });
     if (response.status === 404 || response.status === 405 || response.status == 401) {
+      
       console.debug(
         this.url.toString(),
         "Oauth 404/401/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
@@ -261,7 +264,6 @@ export class RegistryHTTPClient implements Registry {
         repository: string;
         token?: string;
       } = JSON.parse(t);
-
       console.debug(
         `Authenticated with registry ${this.url.toString()} successfully, got token that expires in ${
           response.expires_in
@@ -311,7 +313,7 @@ export class RegistryHTTPClient implements Registry {
 
   async manifestExists(namespace: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
     try {
-      const ctx = await this.authenticate();
+      const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
       req.headers.append("Accept", manifestTypes.join(", "));
       const res = await fetch(req);
@@ -339,7 +341,7 @@ export class RegistryHTTPClient implements Registry {
 
   async getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError> {
     try {
-      const ctx = await this.authenticate();
+      const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
       req.headers.append("Accept", manifestTypes.join(", "));
       const res = await fetch(req);
@@ -370,7 +372,7 @@ export class RegistryHTTPClient implements Registry {
 
   async layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
     try {
-      const ctx = await this.authenticate();
+      const ctx = await this.authenticate(namespace);
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
       if (res.status === 404) {
         return {
@@ -409,7 +411,7 @@ export class RegistryHTTPClient implements Registry {
 
   async getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError> {
     try {
-      const ctx = await this.authenticate();
+      const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
       let res = await fetch(req);
       if (!res.ok) {
