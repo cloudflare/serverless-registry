@@ -387,6 +387,27 @@ for (const compressedDigest of compressedDigests) {
   );
 }
 
+pushTasks.push(
+  pool(async () => {
+    const maxRetries = +(process.env["MAX_RETRIES"] ?? 8);
+    if (isNaN(maxRetries)) throw new Error("MAX_RETRIES is not a number");
+
+    for (let i = 0; i < maxRetries; i++) {
+      let configLayer = file(`${imagePath}/blobs/sha256/${configDigest}`);
+      const stream = configLayer.stream();
+      const digest = `sha256:${configDigest}`;
+      try {
+        await pushLayer(digest, stream, configLayer.size);
+        return;
+      } catch (err) {
+        console.error(digest, "failed to upload", maxRetries - i - 1, "left...", err);
+        configLayer = file(`${imagePath}/blobs/sha256/${configDigest}`);
+      }
+    }
+  }),
+);
+
+
 // pushTasks.push(
 //   pool(async () => {
 //     await pushLayer(
