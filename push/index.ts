@@ -387,20 +387,20 @@ for (const compressedDigest of compressedDigests) {
   );
 }
 
-pushTasks.push(
-  pool(async () => {
-    await pushLayer(
-      `sha256:${configDigest}`,
-      new ReadableStream({
-        pull(controller) {
-          controller.enqueue(config);
-          controller.close();
-        },
-      }),
-      config.size,
-    );
-  }),
-);
+// pushTasks.push(
+//   pool(async () => {
+//     await pushLayer(
+//       `sha256:${configDigest}`,
+//       new ReadableStream({
+//         pull(controller) {
+//           controller.enqueue(config);
+//           controller.close();
+//         },
+//       }),
+//       config.size,
+//     );
+//   }),
+// );
 
 const promises = await Promise.allSettled(pushTasks);
 for (const promise of promises) {
