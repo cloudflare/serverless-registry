@@ -132,6 +132,7 @@ await mkdir(cacheFolder, { recursive: true });
 // const [manifest] = manifests;
 const tasks = [];
 
+console.log(manifest.Layers)
 console.log("Compressing...");
 // Iterate through every layer, read it and compress to a file
 for (const layer of manifest.Layers) {
