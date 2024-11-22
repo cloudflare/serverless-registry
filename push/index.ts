@@ -102,11 +102,11 @@ if (moveManifestFileRes.exitCode !== 0) {
 }
 
 type DockerSaveConfigManifest = {
-  Config: {
+  config: {
     digest: string;
     size: number;
   };
-  Layers: {
+  layers: {
     digest: string;
   }[];
 };
@@ -137,10 +137,10 @@ await mkdir(cacheFolder, { recursive: true });
 // const [manifest] = manifests;
 const tasks = [];
 
-console.log(manifest.Layers)
+console.log(manifest.layers)
 console.log("Compressing...");
 // Iterate through every layer, read it and compress to a file
-for (const layer of manifest.Layers) {
+for (const layer of manifest.layers) {
   tasks.push(
     pool(async () => {
 
