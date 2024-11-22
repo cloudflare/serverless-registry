@@ -90,8 +90,11 @@ const indexJSONFile = (await Bun.file(path.join(imagePath, "index.json")).json()
 //   throw new Error('More than one manifest file found')
 // }
 
+
+console.log(indexJSONFile)
 let manifestFile = indexJSONFile.manifests[0].digest
 manifestFile = manifestFile.replace("sha256:", "")
+console.log(manifestFile, "manifest file found");
 
 const moveManifestFileRes = await $`cp ${imagePath}/blobs/sha256/${manifestFile} ${imagePath}/manifest.json`
 if (moveManifestFileRes.exitCode !== 0) {
