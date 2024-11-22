@@ -96,10 +96,13 @@ let manifestFile = indexJSONFile.manifests[0].digest
 manifestFile = manifestFile.replace("sha256:", "")
 console.log(manifestFile, "manifest file found");
 
-const moveManifestFileRes = await $`cp ${imagePath}/blobs/sha256/${manifestFile} ${imagePath}/manifest.json`
-if (moveManifestFileRes.exitCode !== 0) {
-  throw new Error('Could not move manifest file to manifest.json')
-}
+const manifestBlobFile = file(`${imagePath}/blobs/sha256/${manifestFile}`)
+await Bun.write(`${imagePath}/manifest.json`, manifestBlobFile);
+
+// const moveManifestFileRes = await $`cp ${imagePath}/blobs/sha256/${manifestFile} ${imagePath}/manifest.json`
+// if (moveManifestFileRes.exitCode !== 0) {
+//   throw new Error('Could not move manifest file to manifest.json')
+// }
 
 type DockerSaveConfigManifest = {
   config: {
