@@ -86,9 +86,9 @@ type IndexJSONFile = {
 }
 
 const indexJSONFile = (await Bun.file(path.join(imagePath, "index.json")).json()) as IndexJSONFile;
-if (indexJSONFile.manifests.length > 0) {
-  throw new Error('More than one manifest file found')
-}
+// if (indexJSONFile.manifests.length > 0) {
+//   throw new Error('More than one manifest file found')
+// }
 
 let manifestFile = indexJSONFile.manifests[0].digest
 manifestFile = manifestFile.replace("sha256:", "")
