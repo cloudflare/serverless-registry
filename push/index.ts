@@ -39,33 +39,33 @@ if (installBun.exitCode !== 0) {
 
 
 console.log("Preparing image...");
-const imageMetadataRes = await $`/usr/bin/docker images --format "{{ .ID }}" ${image}`;
-if (imageMetadataRes.exitCode !== 0) {
-  console.error(
-    "Image",
-    image,
-    "doesn't exist. The docker daemon might not be running, or the image doesn't exist. Check your existing images with\n\n\tdocker images",
-  );
-  process.exit(1);
-}
+// const imageMetadataRes = await $`/usr/bin/docker images --format "{{ .ID }}" ${image}`;
+// if (imageMetadataRes.exitCode !== 0) {
+//   console.error(
+//     "Image",
+//     image,
+//     "doesn't exist. The docker daemon might not be running, or the image doesn't exist. Check your existing images with\n\n\tdocker images",
+//   );
+//   process.exit(1);
+// }
 
-const imageID = imageMetadataRes.text();
-if (imageID === "") {
-  console.error("Image", image, "doesn't exist. Check your existing images with\n\n\tdocker images");
-  process.exit(1);
-}
+// const imageID = imageMetadataRes.text();
+// if (imageID === "") {
+//   console.error("Image", image, "doesn't exist. Check your existing images with\n\n\tdocker images");
+//   process.exit(1);
+// }
 
 console.log(`Image ${image} found locally, saving to disk...`);
 
-const tarFile = imageID.trim() + ".tar";
+const tarFile = "output.tar";
 const imagePath = ".output-image";
-if (!(await file(tarFile).exists())) {
-  const output = await $`/usr/bin/docker save ${image} --output ${tarFile}`;
+if ((await file(tarFile).exists())) {
+  // const output = await $`/usr/bin/docker save ${image} --output ${tarFile}`;
 
-  if (output.exitCode != 0) {
-    console.error("Error saving image", image, output.text());
-    process.exit(1);
-  }
+  // if (output.exitCode != 0) {
+  //   console.error("Error saving image", image, output.text());
+  //   process.exit(1);
+  // }
 
   console.log(`Image saved as ${tarFile}, extracting...`);
 
@@ -79,33 +79,57 @@ if (!(await file(tarFile).exists())) {
   console.log(`Extracted to ${imagePath}`);
 } 
 
+type IndexJSONFile = {
+  manifests: {
+    digest: string,
+  }[]
+}
+
+const indexJSONFile = (await Bun.file(path.join(imagePath, "index.json")).json()) as IndexJSONFile;
+if (indexJSONFile.manifests.length > 0) {
+  throw new Error('More than one manifest file found')
+}
+
+let manifestFile = indexJSONFile.manifests[0].digest
+manifestFile = manifestFile.replace("sha256:", "")
+
+const moveManifestFileRes = await $`cp ${imagePath}/blobs/sha256/${manifestFile} ${imagePath}/manifest.json`
+if (moveManifestFileRes.exitCode !== 0) {
+  throw new Error('Could not move manifest file to manifest.json')
+}
+
 type DockerSaveConfigManifest = {
-  Config: string;
-  Layers: string[];
-}[];
+  Config: {
+    digest: string;
+    size: number;
+  };
+  Layers: {
+    digest: string;
+  }[];
+};
 
 import path from "path";
-const manifests = (await Bun.file(path.join(imagePath, "manifest.json")).json()) as DockerSaveConfigManifest;
+const manifest = (await Bun.file(path.join(imagePath, "manifest.json")).json()) as DockerSaveConfigManifest;
 
-if (manifests.length == 0) {
-  console.error("unexpected manifest of length 0");
-  process.exit(1);
-}
+// if (manifests.length == 0) {
+//   console.error("unexpected manifest of length 0");
+//   process.exit(1);
+// }
 
-if (manifests.length > 1) {
-  console.warn("Manifest resolved to multiple images, picking the first one");
-}
+// if (manifests.length > 1) {
+//   console.warn("Manifest resolved to multiple images, picking the first one");
+// }
 
 import plimit from "p-limit";
 const pool = plimit(5);
 import zlib from "node:zlib";
 import { rename, rm } from "node:fs/promises";
 
-const cacheFolder = ".cache";
+const cacheFolder = imagePath;
 
 await mkdir(cacheFolder, { recursive: true });
 
-const [manifest] = manifests;
+// const [manifest] = manifests;
 const tasks = [];
 
 console.log("Compressing...");
@@ -113,85 +137,87 @@ console.log("Compressing...");
 for (const layer of manifest.Layers) {
   tasks.push(
     pool(async () => {
-      let layerPath = path.join(imagePath, layer);
-      // docker likes to put stuff in two ways:
-      //   1. blobs/sha256/<layer>
-      //   2. <layer>/layer.tar
-      //
-      // This handles both cases.
-      let layerName = layer.endsWith(".tar") ? path.dirname(layer) : path.basename(layer);
 
-      const layerCachePath = path.join(cacheFolder, layerName + "-ptr");
-      {
-        const layerCacheGzip = file(layerCachePath);
-        if (await layerCacheGzip.exists()) {
-          const compressedDigest = await layerCacheGzip.text();
-          return compressedDigest;
-        }
-      }
+      return layer.digest.replace("sha256:", "")
+      // let layerPath = path.join(imagePath, layer);
+      // // docker likes to put stuff in two ways:
+      // //   1. blobs/sha256/<layer>
+      // //   2. <layer>/layer.tar
+      // //
+      // // This handles both cases.
+      // let layerName = layer.endsWith(".tar") ? path.dirname(layer) : path.basename(layer);
 
-      const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
-      await rm(inprogressPath, { recursive: true });
+      // const layerCachePath = path.join(cacheFolder, layerName + "-ptr");
+      // {
+      //   const layerCacheGzip = file(layerCachePath);
+      //   if (await layerCacheGzip.exists()) {
+      //     const compressedDigest = await layerCacheGzip.text();
+      //     return compressedDigest;
+      //   }
+      // }
 
-      const hasher = new Bun.CryptoHasher("sha256");
-      const cacheWriter = file(inprogressPath).writer();
-      const gzipStream = zlib.createGzip({ level: 9 });
-      const writeStream = new stream.Writable({
-        write(val: Buffer, _, cb) {
-          hasher.update(val, "binary");
-          cacheWriter.write(val);
-          cb();
-        },
-      });
+      // const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
+      // await rm(inprogressPath, { recursive: true });
 
-      gzipStream.pipe(writeStream);
-      await file(layerPath)
-        .stream()
-        .pipeTo(
-          new WritableStream({
-            write(value: Buffer) {
-              return new Promise(async (res) => {
-                const needsWriteBackoff = gzipStream.write(value);
-                // We need to back-off with the writes
-                if (!needsWriteBackoff) {
-                  const onDrain = () => {
-                    // Remove event listener when it finishes
-                    gzipStream.off("drain", onDrain);
-                    res();
-                  };
+      // const hasher = new Bun.CryptoHasher("sha256");
+      // const cacheWriter = file(inprogressPath).writer();
+      // const gzipStream = zlib.createGzip({ level: 9 });
+      // const writeStream = new stream.Writable({
+      //   write(val: Buffer, _, cb) {
+      //     hasher.update(val, "binary");
+      //     cacheWriter.write(val);
+      //     cb();
+      //   },
+      // });
 
-                  gzipStream.on("drain", onDrain);
-                  return;
-                }
+      // gzipStream.pipe(writeStream);
+      // await file(layerPath)
+      //   .stream()
+      //   .pipeTo(
+      //     new WritableStream({
+      //       write(value: Buffer) {
+      //         return new Promise(async (res) => {
+      //           const needsWriteBackoff = gzipStream.write(value);
+      //           // We need to back-off with the writes
+      //           if (!needsWriteBackoff) {
+      //             const onDrain = () => {
+      //               // Remove event listener when it finishes
+      //               gzipStream.off("drain", onDrain);
+      //               res();
+      //             };
 
-                res();
-              });
-            },
-            close() {
-              return new Promise(async (res) => {
-                // Flush before end
-                await new Promise((resFlush) => gzipStream.flush(() => resFlush(true)));
-                // End the stream
-                gzipStream.end(res);
-              });
-            },
-          }),
-        );
+      //             gzipStream.on("drain", onDrain);
+      //             return;
+      //           }
 
-      // Wait until the gzipStream has finished all the piping
-      await new Promise((res) => gzipStream.on("end", () => res(true)));
+      //           res();
+      //         });
+      //       },
+      //       close() {
+      //         return new Promise(async (res) => {
+      //           // Flush before end
+      //           await new Promise((resFlush) => gzipStream.flush(() => resFlush(true)));
+      //           // End the stream
+      //           gzipStream.end(res);
+      //         });
+      //       },
+      //     }),
+      //   );
 
-      const digest = hasher.digest("hex");
-      await rename(inprogressPath, path.join(cacheFolder, digest));
-      await write(layerCachePath, digest);
-      return digest;
+      // // Wait until the gzipStream has finished all the piping
+      // await new Promise((res) => gzipStream.on("end", () => res(true)));
+
+      // const digest = hasher.digest("hex");
+      // await rename(inprogressPath, path.join(cacheFolder, digest));
+      // await write(layerCachePath, digest);
+      // return digest;
     }),
   );
 }
 
-const configManifest = path.join(imagePath, manifest.Config);
-const config = await file(configManifest).text();
-const configDigest = new CryptoHasher("sha256").update(config).digest("hex");
+// const configManifest = manifest.Config
+const config = manifest.Config
+const configDigest = config.digest.replace("sha256:", "")
 
 const compressedDigests = await Promise.all(tasks);
 
@@ -329,7 +355,7 @@ const layersManifest = [] as {
 }[];
 
 for (const compressedDigest of compressedDigests) {
-  let layer = file(path.join(cacheFolder, compressedDigest));
+  let layer = file(`${imagePath}/blobs/sha256/${compressedDigest}`);
   layersManifest.push({
     mediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
     size: layer.size,
@@ -348,7 +374,7 @@ for (const compressedDigest of compressedDigests) {
           return;
         } catch (err) {
           console.error(digest, "failed to upload", maxRetries - i - 1, "left...", err);
-          layer = file(path.join(cacheFolder, compressedDigest));
+          layer = file(`${imagePath}/blobs/sha256/${compressedDigest}`);
         }
       }
     }),
@@ -365,7 +391,7 @@ pushTasks.push(
           controller.close();
         },
       }),
-      config.length,
+      config.size,
     );
   }),
 );
@@ -382,7 +408,7 @@ const manifestObject = {
   mediaType: "application/vnd.oci.image.manifest.v1+json",
   config: {
     mediaType: "application/vnd.oci.image.config.v1+json",
-    size: config.length,
+    size: config.size,
     digest: `sha256:${configDigest}`,
   },
   layers: layersManifest,
