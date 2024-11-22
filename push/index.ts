@@ -222,7 +222,7 @@ for (const layer of manifest.layers) {
 }
 
 // const configManifest = manifest.Config
-const config = manifest.Config
+const config = manifest.config
 const configDigest = config.digest.replace("sha256:", "")
 
 const compressedDigests = await Promise.all(tasks);
