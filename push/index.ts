@@ -123,6 +123,8 @@ const manifest = (await Bun.file(path.join(imagePath, "manifest.json")).json()) 
 //   console.warn("Manifest resolved to multiple images, picking the first one");
 // }
 
+console.log(manifest, "manifest")
+
 import plimit from "p-limit";
 const pool = plimit(5);
 import zlib from "node:zlib";
