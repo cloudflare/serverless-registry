@@ -455,6 +455,7 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   );
 
   if (err) {
+    console.error("Error uploading manifest", errorString(err))
     return new InternalError();
   }
 

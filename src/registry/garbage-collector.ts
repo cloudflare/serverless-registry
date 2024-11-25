@@ -4,6 +4,7 @@
 
 import { ServerError } from "../errors";
 import { ManifestSchema } from "../manifest";
+import { isReference } from "./r2";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -219,6 +220,12 @@ export class GarbageCollector {
     await this.list(`${options.name}/blobs/`, async (object) => {
       const hash = object.key.split("/").pop();
       if (hash && !referencedBlobs.has(hash)) {
+        const key = isReference(object);
+        // also push the underlying reference object
+        if (key) {
+          unreferencedKeys.push(key);
+        }
+
         unreferencedKeys.push(object.key);
         if (unreferencedKeys.length > deleteThreshold) {
           if (!(await this.checkIfGCCanContinue(options.name, mark))) {
