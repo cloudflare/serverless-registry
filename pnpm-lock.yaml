@@ -14,6 +14,9 @@ importers:
       '@cfworker/base64url':
         specifier: ^1.12.5
         version: 1.12.5
+      '@taylorzane/hash-wasm':
+        specifier: ^0.0.11
+        version: 0.0.11
       '@tsndr/cloudflare-worker-jwt':
         specifier: ^2.5.1
         version: 2.5.3
@@ -555,6 +558,9 @@ packages:
     resolution: {integrity: sha512-j8pPKp53/lq9lMXN57S8cFz0MynJk8OWNuUnXct/9KCpKU7DgU3bYMJhwWmcqC0UU29p8Lr0/7KEVcaM6bf47Q==}
     cpu: [x64]
     os: [win32]
+
+  '@taylorzane/hash-wasm@0.0.11':
+    resolution: {integrity: sha512-gGS/x7hCq6MlwGoLiscyTG/pSaVhshImaHd+ttV1uK0aYPCQNsbPCROAzBDCh+FxpiLgzX6JaX8BIYFlljFEpQ==}
 
   '@tsndr/cloudflare-worker-jwt@2.5.3':
     resolution: {integrity: sha512-zbdvjRG86y/ObiBgTJrzBC39t2FcaeGwB6AV7VO4LvHKJNyZvLYRbKT68eaoJhnJldyHhs7yZ69neRVdUd9knA==}
@@ -1688,6 +1694,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.22.4':
     optional: true
+
+  '@taylorzane/hash-wasm@0.0.11': {}
 
   '@tsndr/cloudflare-worker-jwt@2.5.3': {}
 

@@ -329,7 +329,7 @@ v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
 
 // this is the first thing that the client asks for in an upload
 v2Router.post("/:name+/blobs/uploads/", async (req, env: Env) => {
-   const { name } = req.params;
+  const { name } = req.params;
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(env.REGISTRY_CLIENT.startUpload(name));
 
   if (err) {
@@ -398,6 +398,13 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
     return new Response(null, { status: 400 });
   }
 
+  // if (req.headers.get("x-fail") === "true") {
+  //   const digest = new crypto.DigestStream("SHA-256");
+  //   req.body.pipeTo(digest);
+  //   await digest.digest;
+  //   return new Response(null, { status: 500 });
+  // }
+
   let contentLengthString = req.headers.get("Content-Length");
   let stream = req.body;
   if (!contentLengthString) {
@@ -455,6 +462,7 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   );
 
   if (err) {
+    console.error("Error uploading manifest", errorString(err));
     return new InternalError();
   }
 
