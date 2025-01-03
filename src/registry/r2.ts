@@ -719,6 +719,7 @@ export class R2Registry implements Registry {
 
     const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
     await upload.abort();
+    await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
     return true;
   }
 
