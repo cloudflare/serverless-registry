@@ -43,6 +43,7 @@ v2Router.get("/_catalog", async (req, env: Env) => {
     {
       headers: {
         Link: `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
+        "Content-Type": "application/json",
       },
     },
   );
