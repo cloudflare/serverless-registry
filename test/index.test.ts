@@ -242,7 +242,7 @@ describe("v2 manifests", () => {
 
   test("PUT then list tags with GET /v2/:name/tags/list", async () => {
     const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
-    const expectedRes = ["hello", sha256];
+    const expectedRes = ["hello"];
     for (let i = 0; i < 50; i++) {
       expectedRes.push(`hello-${i}`);
     }
@@ -257,6 +257,7 @@ describe("v2 manifests", () => {
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-list");
     expect(tags.tags).toEqual(expectedRes);
+    expect(tags.tags).not.contain(sha256)
 
     const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${sha256}`, null));
     expect(res.ok).toBeTruthy();
@@ -514,8 +515,8 @@ describe("push and catalog", () => {
       "hello",
       "hello-2",
       "latest",
-      "sha256:a8a29b609fa044cf3ee9a79b57a6fbfb59039c3e9c4f38a57ecb76238bf0dec6",
     ]);
+    expect(tags.tags).not.contain("sha256:a8a29b609fa044cf3ee9a79b57a6fbfb59039c3e9c4f38a57ecb76238bf0dec6");
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -557,8 +558,8 @@ describe("push and catalog", () => {
       "hello",
       "hello-2",
       "latest",
-      "sha256:a70525d2dd357c6ece8d9e0a5a232e34ca3bbceaa1584d8929cdbbfc81238210",
     ]);
+    expect(tags.tags).not.contain("sha256:a70525d2dd357c6ece8d9e0a5a232e34ca3bbceaa1584d8929cdbbfc81238210");
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
