@@ -120,7 +120,7 @@ export async function getUploadState(
     throw new InternalError();
   }
 
-  if (!verifyHash && stateStrHash !== verifyHash) {
+  if (verifyHash !== undefined && stateStrHash !== verifyHash) {
     return new RangeError(stateStrHash, stateObject);
   }
 
@@ -719,6 +719,7 @@ export class R2Registry implements Registry {
 
     const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
     await upload.abort();
+    await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
     return true;
   }
 
