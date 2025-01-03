@@ -1,6 +1,11 @@
 name = "r2-registry"
 
-workers_dev = true
+# Custom Cloudflare domain for worker: 
+# routes = [
+#  { pattern = "your.custom.domain", custom_domain = true } 
+# ]
+
+workers_dev = true #set to false to disable the default Worker domain (applicable only if custom domain is used instead)
 main = "./index.ts"
 compatibility_date = "2024-09-09"
 compatibility_flags = ["nodejs_compat"]
