@@ -120,7 +120,7 @@ export async function getUploadState(
     throw new InternalError();
   }
 
-  if (!verifyHash && stateStrHash !== verifyHash) {
+  if (verifyHash !== undefined && stateStrHash !== verifyHash) {
     return new RangeError(stateStrHash, stateObject);
   }
 
