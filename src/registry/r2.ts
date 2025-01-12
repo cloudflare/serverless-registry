@@ -377,6 +377,48 @@ export class R2Registry implements Registry {
     };
   }
 
+  async mountExistingLayer(
+    source_name: string,
+    digest: string,
+    destination_name: string,
+  ): Promise<RegistryError | FinishedUploadObject> {
+    const source_layer_path = `${source_name}/blobs/${digest}`;
+    const [res, err] = await wrap(this.env.REGISTRY.head(source_layer_path));
+    if (err) {
+      return wrapError("mountExistingLayer", err);
+    }
+    if (!res) {
+      return wrapError("mountExistingLayer", "Layer not found");
+    } else {
+      const destination_layer_path = `${destination_name}/blobs/${digest}`;
+      if (source_layer_path === destination_layer_path) {
+        // Bad request
+        throw new InternalError();
+      }
+      // Trying to mount a layer from source_layer_path to destination_layer_path
+
+      // Create linked file with custom metadata
+      const [newFile, error] = await wrap(
+        this.env.REGISTRY.put(destination_layer_path, source_layer_path, {
+          sha256: await getSHA256(source_layer_path, ""),
+          httpMetadata: res.httpMetadata,
+          customMetadata: { r2_symlink: "true" },
+        }),
+      );
+      if (error) {
+        return wrapError("mountExistingLayer", error);
+      }
+      if (newFile && "response" in newFile) {
+        return wrapError("mountExistingLayer", newFile.response);
+      }
+
+      return {
+        digest: hexToDigest(res.checksums.sha256!),
+        location: `/v2/${destination_layer_path}`,
+      };
+    }
+  }
+
   async layerExists(name: string, tag: string): Promise<RegistryError | CheckLayerResponse> {
     const [res, err] = await wrap(this.env.REGISTRY.head(`${name}/blobs/${tag}`));
     if (err) {
@@ -406,6 +448,19 @@ export class R2Registry implements Registry {
       return {
         response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
       };
+    }
+
+    // Handle R2 symlink
+    if (res.customMetadata && "r2_symlink" in res.customMetadata) {
+      const layer_path = await res.text();
+      // Symlink detected! Will download layer from "layer_path"
+      const [link_name, link_digest] = layer_path.split("/blobs/");
+      if (link_name == name && link_digest == digest) {
+        return {
+          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+        };
+      }
+      return await this.env.REGISTRY_CLIENT.getLayer(link_name, link_digest);
     }
 
     return {
