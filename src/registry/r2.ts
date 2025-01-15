@@ -713,7 +713,9 @@ export class R2Registry implements Registry {
       return { response: new InternalError() };
     }
     if (hashedState === null || !hashedState.state) {
-      return { response: new InternalError() };
+      return {
+        response: new Response(null, { status: 404 }),
+      }
     }
     const state = hashedState.state;
 
