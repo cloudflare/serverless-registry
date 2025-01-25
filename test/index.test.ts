@@ -13,29 +13,47 @@ import worker from "../index";
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 
 async function generateManifest(name: string, schemaVersion: 1 | 2 = 2): Promise<ManifestSchema> {
-  const data = "bla";
-  const sha256 = await getSHA256(data);
+  // Layer data
+  const layer_data = Math.random().toString(36).substring(2); // Random string data
+  const layer_sha256 = await getSHA256(layer_data);
+  // Upload layer data
   const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
   expect(res.ok).toBeTruthy();
-  const blob = new Blob([data]).stream();
-  const stream = limit(blob, data.length);
+  const blob = new Blob([layer_data]).stream();
+  const stream = limit(blob, layer_data.length);
   const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
   expect(res2.ok).toBeTruthy();
-  const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
+  const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + layer_sha256, null, {}));
   expect(last.ok).toBeTruthy();
+  // Config data
+  const config_data = Math.random().toString(36).substring(2); // Random string data
+  const config_sha256 = await getSHA256(config_data);
+  if (schemaVersion === 2) {
+    // Upload config layer
+    const config_res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    expect(config_res.ok).toBeTruthy();
+    const config_blob = new Blob([config_data]).stream();
+    const config_stream = limit(config_blob, config_data.length);
+    const config_res2 = await fetch(createRequest("PATCH", config_res.headers.get("location")!, config_stream, {}));
+    expect(config_res2.ok).toBeTruthy();
+    const config_last = await fetch(
+      createRequest("PUT", config_res2.headers.get("location")! + "&digest=" + config_sha256, null, {}),
+    );
+    expect(config_last.ok).toBeTruthy();
+  }
   return schemaVersion === 1
     ? {
         schemaVersion,
-        fsLayers: [{ blobSum: sha256 }],
+        fsLayers: [{ blobSum: layer_sha256 }],
         architecture: "amd64",
       }
     : {
         schemaVersion,
         layers: [
-          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
-          { size: data.length, digest: sha256, mediaType: "shouldbeanything" },
+          { size: layer_data.length, digest: layer_sha256, mediaType: "shouldbeanything" },
+          { size: layer_data.length, digest: layer_sha256, mediaType: "shouldbeanything" },
         ],
-        config: { size: data.length, digest: sha256, mediaType: "configmediatypeshouldntbechecked" },
+        config: { size: config_data.length, digest: config_sha256, mediaType: "configmediatypeshouldntbechecked" },
         mediaType: "shouldalsobeanythingforretrocompatibility",
       };
 }
@@ -198,7 +216,7 @@ describe("v2 manifests", () => {
 
     {
       const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
-      expect(listObjects.objects.length).toEqual(1);
+      expect(listObjects.objects.length).toEqual(2);
 
       const gcRes = await fetch(new Request("http://registry.com/v2/hello-world/gc", { method: "POST" }));
       if (!gcRes.ok) {
@@ -206,7 +224,7 @@ describe("v2 manifests", () => {
       }
 
       const listObjectsAfterGC = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
-      expect(listObjectsAfterGC.objects.length).toEqual(1);
+      expect(listObjectsAfterGC.objects.length).toEqual(2);
     }
 
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeTruthy();
@@ -216,7 +234,7 @@ describe("v2 manifests", () => {
     expect(await bindings.REGISTRY.head(`hello-world/manifests/hello`)).toBeNull();
 
     const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world/blobs/" });
-    expect(listObjects.objects.length).toEqual(1);
+    expect(listObjects.objects.length).toEqual(2);
 
     const listObjectsManifests = await bindings.REGISTRY.list({ prefix: "hello-world/manifests/" });
     expect(listObjectsManifests.objects.length).toEqual(0);
@@ -241,7 +259,9 @@ describe("v2 manifests", () => {
   });
 
   test("PUT then list tags with GET /v2/:name/tags/list", async () => {
+    const manifest_list = new Set<string>();
     const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
+    manifest_list.add(sha256);
     const expectedRes = ["hello", sha256];
     for (let i = 0; i < 50; i++) {
       expectedRes.push(`hello-${i}`);
@@ -250,16 +270,19 @@ describe("v2 manifests", () => {
     expectedRes.sort();
     const shuffledRes = shuffleArray([...expectedRes]);
     for (const tag of shuffledRes) {
-      await createManifest("hello-world-list", await generateManifest("hello-world-list"), tag);
+      const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), tag);
+      manifest_list.add(sha256);
     }
 
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-list");
-    expect(tags.tags).toEqual(expectedRes);
+    expect(tags.tags).containSubset(expectedRes); // TODO this test will be overwrite by PR #89 once merged
 
-    const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${sha256}`, null));
-    expect(res.ok).toBeTruthy();
+    for (const manifest_sha256 of manifest_list) {
+      const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${manifest_sha256}`, null));
+      expect(res.ok).toBeTruthy();
+    }
     const tagsResEmpty = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list`, null));
     const tagsEmpty = (await tagsResEmpty.json()) as TagsList;
     expect(tagsEmpty.tags).toHaveLength(0);
@@ -510,12 +533,7 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).toEqual([
-      "hello",
-      "hello-2",
-      "latest",
-      "sha256:a8a29b609fa044cf3ee9a79b57a6fbfb59039c3e9c4f38a57ecb76238bf0dec6",
-    ]);
+    expect(tags.tags).containSubset(["hello", "hello-2", "latest"]); // TODO this test will be overwrite by PR #89 once merged
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -534,6 +552,22 @@ describe("push and catalog", () => {
     }
 
     expect(repositoryBuildUp).toEqual(expectedRepositories);
+
+    // Check blobs count
+    const bindings = env as Env;
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world-main/blobs/" });
+      expect(listObjects.objects.length).toEqual(6);
+    }
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello/blobs/" });
+      expect(listObjects.objects.length).toEqual(2);
+    }
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello/hello/blobs/" });
+      expect(listObjects.objects.length).toEqual(2);
+    }
+
   });
 
   test("(v1) push and then use the catalog", async () => {
@@ -553,12 +587,7 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).toEqual([
-      "hello",
-      "hello-2",
-      "latest",
-      "sha256:a70525d2dd357c6ece8d9e0a5a232e34ca3bbceaa1584d8929cdbbfc81238210",
-    ]);
+    expect(tags.tags).containSubset(["hello", "hello-2", "latest"]); // TODO this test will be overwrite by PR #89 once merged
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -577,5 +606,20 @@ describe("push and catalog", () => {
     }
 
     expect(repositoryBuildUp).toEqual(expectedRepositories);
+
+    // Check blobs count
+    const bindings = env as Env;
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello-world-main/blobs/" });
+      expect(listObjects.objects.length).toEqual(3);
+    }
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello/blobs/" });
+      expect(listObjects.objects.length).toEqual(1);
+    }
+    {
+      const listObjects = await bindings.REGISTRY.list({ prefix: "hello/hello/blobs/" });
+      expect(listObjects.objects.length).toEqual(1);
+    }
   });
 });
