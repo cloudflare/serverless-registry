@@ -4,6 +4,7 @@
 
 import { ServerError } from "../errors";
 import { ManifestSchema } from "../manifest";
+import { hexToDigest } from "../user";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -147,7 +148,7 @@ export class GarbageCollector {
   }
 
   private async list(prefix: string, callback: (object: R2Object) => Promise<boolean>): Promise<boolean> {
-    const listed = await this.registry.list({ prefix });
+    const listed = await this.registry.list({ prefix: prefix, include: ["customMetadata"] });
     for (const object of listed.objects) {
       if ((await callback(object)) === false) {
         return false;
@@ -182,61 +183,140 @@ export class GarbageCollector {
 
   private async collectInner(options: GCOptions): Promise<boolean> {
     // We can run out of memory, this should be a bloom filter
-    let referencedBlobs = new Set<string>();
+    const manifestList: { [key: string]: Set<string> } = {};
     const mark = await this.getInsertionMark(options.name);
 
+    // List manifest from repo to be scanned
     await this.list(`${options.name}/manifests/`, async (manifestObject) => {
-      const tag = manifestObject.key.split("/").pop();
-      if (!tag || (options.mode === "untagged" && tag.startsWith("sha256:"))) {
-        return true;
+      const current_hash_file = hexToDigest(manifestObject.checksums.sha256!);
+      if (manifestList[current_hash_file] === undefined) {
+        manifestList[current_hash_file] = new Set<string>();
       }
-      const manifest = await this.registry.get(manifestObject.key);
-      if (!manifest) {
-        return true;
+      manifestList[current_hash_file].add(manifestObject.key);
+      return true;
+    });
+
+    // In untagged mode, search for manifest to delete
+    if (options.mode === "untagged") {
+      const manifestToRemove = new Set<string>();
+      const referencedManifests = new Set<string>();
+      // List tagged manifest to find manifest-list
+      for (const [_, manifests] of Object.entries(manifestList)) {
+        const tagged_manifest = [...manifests].filter((item) => !item.split("/").pop()?.startsWith("sha256:"));
+        for (const manifest_path of tagged_manifest) {
+          // Tagged manifest some, load manifest content
+          const manifest = await this.registry.get(manifest_path);
+          if (!manifest) {
+            continue;
+          }
+
+          const manifestData = (await manifest.json()) as ManifestSchema;
+          // Search for manifest list
+          if (manifestData.schemaVersion == 2 && "manifests" in manifestData) {
+            // Extract referenced manifests from manifest list
+            manifestData.manifests.forEach((manifest) => {
+              referencedManifests.add(manifest.digest);
+            });
+          }
+        }
       }
 
-      const manifestData = (await manifest.json()) as ManifestSchema;
-      // TODO: garbage collect manifests.
-      if ("manifests" in manifestData) {
-        return true;
+      for (const [key, manifests] of Object.entries(manifestList)) {
+        if (referencedManifests.has(key)) {
+          continue;
+        }
+        if (![...manifests].some((item) => !item.split("/").pop()?.startsWith("sha256:"))) {
+          // Add untagged manifest that should be removed
+          manifests.forEach((manifest) => {
+            manifestToRemove.add(manifest);
+          });
+          // Manifest to be removed shouldn't be parsed to search for referenced layers
+          delete manifestList[key];
+        }
       }
+
+      // Deleting untagged manifest
+      if (manifestToRemove.size > 0) {
+        if (!(await this.checkIfGCCanContinue(options.name, mark))) {
+          throw new Error("there is a manifest insertion going, the garbage collection shall stop");
+        }
+
+        // GC will deleted untagged manifest
+        await this.registry.delete(manifestToRemove.values().toArray());
+      }
+    }
+
+    const referencedBlobs = new Set<string>();
+    // From manifest, extract referenced layers
+    for (const [_, manifests] of Object.entries(manifestList)) {
+      // Select only one manifest per unique manifest
+      const manifest_path = manifests.values().next().value;
+      if (manifest_path === undefined) {
+        continue;
+      }
+      const manifest = await this.registry.get(manifest_path);
+      // Skip if manifest not found
+      if (!manifest) continue;
+
+      const manifestData = (await manifest.json()) as ManifestSchema;
 
       if (manifestData.schemaVersion === 1) {
         manifestData.fsLayers.forEach((layer) => {
           referencedBlobs.add(layer.blobSum);
         });
       } else {
+        // Skip manifest-list, they don't contain any layers references
+        if ("manifests" in manifestData) continue;
+        // Add referenced layers from current manifest
         manifestData.layers.forEach((layer) => {
           referencedBlobs.add(layer.digest);
         });
+        // Add referenced config blob from current manifest
+        referencedBlobs.add(manifestData.config.digest);
       }
+    }
 
-      return true;
-    });
-
-    let unreferencedKeys: string[] = [];
-    const deleteThreshold = 15;
+    const unreferencedBlobs = new Set<string>();
+    // List blobs to be removed
     await this.list(`${options.name}/blobs/`, async (object) => {
-      const hash = object.key.split("/").pop();
-      if (hash && !referencedBlobs.has(hash)) {
-        unreferencedKeys.push(object.key);
-        if (unreferencedKeys.length > deleteThreshold) {
-          if (!(await this.checkIfGCCanContinue(options.name, mark))) {
-            throw new ServerError("there is a manifest insertion going, the garbage collection shall stop");
-          }
-
-          await this.registry.delete(unreferencedKeys);
-          unreferencedKeys = [];
-        }
+      const blob_hash = object.key.split("/").pop();
+      if (blob_hash && !referencedBlobs.has(blob_hash)) {
+        unreferencedBlobs.add(object.key);
       }
       return true;
     });
-    if (unreferencedKeys.length > 0) {
+
+    // Check for symlink before removal
+    if (unreferencedBlobs.size >= 0) {
+      await this.list("", async (object) => {
+        const object_path = object.key;
+        // Skip non-blobs object and from any other repository (symlink only target cross repository blobs)
+        if (object_path.startsWith(`${options.name}/`) || !object_path.includes("/blobs/sha256:")) {
+          return true;
+        }
+        if (object.customMetadata && object.customMetadata["r2_symlink"] !== undefined) {
+          // Find symlink target
+          const manifest = await this.registry.get(object.key);
+          // Skip if manifest not found
+          if (!manifest) return true;
+          // Get symlink target
+          const symlink_target = await manifest.text();
+          if (unreferencedBlobs.has(symlink_target)) {
+            // This symlink target a layer that should be removed
+            unreferencedBlobs.delete(symlink_target);
+          }
+        }
+        return unreferencedBlobs.size > 0;
+      });
+    }
+
+    if (unreferencedBlobs.size > 0) {
       if (!(await this.checkIfGCCanContinue(options.name, mark))) {
         throw new Error("there is a manifest insertion going, the garbage collection shall stop");
       }
 
-      await this.registry.delete(unreferencedKeys);
+      // GC will delete unreferenced blobs
+      await this.registry.delete(unreferencedBlobs.values().toArray());
     }
 
     return true;
