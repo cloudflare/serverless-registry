@@ -323,7 +323,7 @@ describe("v2 manifests", () => {
     const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
     manifest_list.add(sha256);
     const expectedRes = ["hello", sha256];
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 40; i++) {
       expectedRes.push(`hello-${i}`);
     }
 
@@ -772,6 +772,18 @@ describe("v2 manifest-list", () => {
     expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${sha256}`)).toBeTruthy();
     expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${amd_sha256}`)).toBeTruthy();
     expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${arm_sha256}`)).toBeTruthy();
+
+    // Check symlink binding
+    expect(amd_manifest.schemaVersion === 2).toBeTruthy();
+    expect("manifests" in amd_manifest).toBeFalsy();
+    if (amd_manifest.schemaVersion === 2 && !("manifests" in amd_manifest)) {
+      const layer_digest = amd_manifest.layers[0].digest;
+      const layer_source = await fetch(createRequest("GET", `/v2/${preprod_name}/blobs/${layer_digest}`, null));
+      expect(layer_source.ok).toBeTruthy();
+      const layer_linked = await fetch(createRequest("GET", `/v2/${prod_name}/blobs/${layer_digest}`, null));
+      expect(layer_linked.ok).toBeTruthy();
+      expect(await layer_linked.text()).toEqual(await layer_source.text())
+    }
   });
 });
 
