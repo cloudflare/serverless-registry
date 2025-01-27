@@ -2,7 +2,6 @@
 // Unreferenced will delete all blobs that are not referenced by any manifest.
 // Untagged will delete all blobs that are not referenced by any manifest and are not tagged.
 
-import { ServerError } from "../errors";
 import { ManifestSchema } from "../manifest";
 import { hexToDigest } from "../user";
 

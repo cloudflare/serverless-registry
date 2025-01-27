@@ -150,14 +150,12 @@ export class R2Registry implements Registry {
       return { response: new ServerError("invalid checksum from R2 backend") };
     }
 
-    const checkManifestResponse = {
+    return {
       exists: true,
       digest: hexToDigest(res.checksums.sha256!),
       contentType: res.httpMetadata!.contentType!,
       size: res.size,
     };
-
-    return checkManifestResponse;
   }
 
   async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
@@ -395,6 +393,10 @@ export class R2Registry implements Registry {
         // Bad request
         throw new InternalError();
       }
+      // Prevent recursive symlink
+      if (res.customMetadata && "r2_symlink" in res.customMetadata) {
+        return await this.mountExistingLayer(res.customMetadata.r2_symlink, digest, destination_name);
+      }
       // Trying to mount a layer from source_layer_path to destination_layer_path
 
       // Create linked file with custom metadata
@@ -402,7 +404,7 @@ export class R2Registry implements Registry {
         this.env.REGISTRY.put(destination_layer_path, source_layer_path, {
           sha256: await getSHA256(source_layer_path, ""),
           httpMetadata: res.httpMetadata,
-          customMetadata: { r2_symlink: "true" },
+          customMetadata: { r2_symlink: source_name },  // Storing target repository name in metadata (to easily resolve recursive layer mounting)
         }),
       );
       if (error) {
@@ -804,7 +806,6 @@ export class R2Registry implements Registry {
   }
 
   async garbageCollection(namespace: string, mode: GarbageCollectionMode): Promise<boolean> {
-    const result = await this.gc.collect({ name: namespace, mode: mode });
-    return result;
+    return await this.gc.collect({ name: namespace, mode: mode });
   }
 }

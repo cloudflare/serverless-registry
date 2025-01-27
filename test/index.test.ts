@@ -204,7 +204,7 @@ async function createManifest(name: string, schema: ManifestSchema, tag?: string
   return { sha256 };
 }
 
-async function mountLayersFromManifest(from: string, schema: ManifestSchema, name: string): Promise<number> {
+function getLayersFromManifest(schema: ManifestSchema): string[] {
   const layers_digest = [];
   if (schema.schemaVersion === 1) {
     for (const layer of schema.fsLayers) {
@@ -216,6 +216,11 @@ async function mountLayersFromManifest(from: string, schema: ManifestSchema, nam
       layers_digest.push(layer.digest);
     }
   }
+  return layers_digest;
+}
+
+async function mountLayersFromManifest(from: string, schema: ManifestSchema, name: string): Promise<number> {
+  const layers_digest = getLayersFromManifest(schema);
 
   for (const layer_digest of layers_digest) {
     const res = await fetch(
@@ -346,6 +351,65 @@ describe("v2 manifests", () => {
     const tagsResEmpty = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list`, null));
     const tagsEmpty = (await tagsResEmpty.json()) as TagsList;
     expect(tagsEmpty.tags).toHaveLength(0);
+  });
+
+  test("Upload manifests with recursive layer mounting", async () => {
+    const repo_a = "app-a";
+    const repo_b = "app-b";
+    const repo_c = "app-c";
+
+    // Generate manifest
+    const app_manifest = await generateManifest(repo_a);
+    // Create architecture specific repository
+    await createManifest(repo_a, app_manifest, `latest`);
+
+    // Upload app from repo_a to repo_b
+    await mountLayersFromManifest(repo_a, app_manifest, repo_b);
+    await createManifest(repo_b, app_manifest, `latest`);
+
+    // Upload app from repo_b to repo_c
+    await mountLayersFromManifest(repo_b, app_manifest, repo_c);
+    await createManifest(repo_c, app_manifest, `latest`);
+
+    const bindings = env as Env;
+    // Check manifest count
+    {
+      const manifest_count_a = (await bindings.REGISTRY.list({ prefix: `${repo_a}/manifests/` })).objects.length;
+      const manifest_count_b = (await bindings.REGISTRY.list({ prefix: `${repo_b}/manifests/` })).objects.length;
+      const manifest_count_c = (await bindings.REGISTRY.list({ prefix: `${repo_c}/manifests/` })).objects.length;
+      expect(manifest_count_a).toEqual(manifest_count_b);
+      expect(manifest_count_a).toEqual(manifest_count_c);
+    }
+    // Check blobs count
+    {
+      const layers_count_a = (await bindings.REGISTRY.list({ prefix: `${repo_a}/blobs/` })).objects.length;
+      const layers_count_b = (await bindings.REGISTRY.list({ prefix: `${repo_b}/blobs/` })).objects.length;
+      const layers_count_c = (await bindings.REGISTRY.list({ prefix: `${repo_c}/blobs/` })).objects.length;
+      expect(layers_count_a).toEqual(layers_count_b);
+      expect(layers_count_a).toEqual(layers_count_c);
+    }
+    // Check symlink direct layer target
+    for (const layer of getLayersFromManifest(app_manifest)) {
+      const repo_b_layer = await bindings.REGISTRY.get(`${repo_b}/blobs/${layer}`);
+      const repo_c_layer = await bindings.REGISTRY.get(`${repo_c}/blobs/${layer}`);
+      expect(repo_b_layer).not.toBeNull();
+      expect(repo_c_layer).not.toBeNull();
+      if (repo_b_layer !== null && repo_c_layer !== null) {
+        // Check if both symlink target the same original blob
+        expect(await repo_b_layer.text()).toEqual(`${repo_a}/blobs/${layer}`);
+        expect(await repo_c_layer.text()).toEqual(`${repo_a}/blobs/${layer}`);
+        // Check layer download follow symlink
+        const layer_source = await fetch(createRequest("GET", `/v2/${repo_a}/blobs/${layer}`, null));
+        expect(layer_source.ok).toBeTruthy();
+        const source_data = await layer_source.bytes();
+        const layer_b = await fetch(createRequest("GET", `/v2/${repo_b}/blobs/${layer}`, null));
+        expect(layer_b.ok).toBeTruthy();
+        const layer_c = await fetch(createRequest("GET", `/v2/${repo_c}/blobs/${layer}`, null));
+        expect(layer_c.ok).toBeTruthy();
+        expect(await layer_b.bytes()).toEqual(source_data);
+        expect(await layer_c.bytes()).toEqual(source_data);
+      }
+    }
   });
 });
 
@@ -782,7 +846,7 @@ describe("v2 manifest-list", () => {
       expect(layer_source.ok).toBeTruthy();
       const layer_linked = await fetch(createRequest("GET", `/v2/${prod_name}/blobs/${layer_digest}`, null));
       expect(layer_linked.ok).toBeTruthy();
-      expect(await layer_linked.text()).toEqual(await layer_source.text())
+      expect(await layer_linked.text()).toEqual(await layer_source.text());
     }
   });
 });
