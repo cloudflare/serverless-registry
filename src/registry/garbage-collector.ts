@@ -187,11 +187,11 @@ export class GarbageCollector {
 
     // List manifest from repo to be scanned
     await this.list(`${options.name}/manifests/`, async (manifestObject) => {
-      const current_hash_file = hexToDigest(manifestObject.checksums.sha256!);
-      if (manifestList[current_hash_file] === undefined) {
-        manifestList[current_hash_file] = new Set<string>();
+      const currentHashFile = hexToDigest(manifestObject.checksums.sha256!);
+      if (manifestList[currentHashFile] === undefined) {
+        manifestList[currentHashFile] = new Set<string>();
       }
-      manifestList[current_hash_file].add(manifestObject.key);
+      manifestList[currentHashFile].add(manifestObject.key);
       return true;
     });
 
@@ -201,10 +201,10 @@ export class GarbageCollector {
       const referencedManifests = new Set<string>();
       // List tagged manifest to find manifest-list
       for (const [_, manifests] of Object.entries(manifestList)) {
-        const tagged_manifest = [...manifests].filter((item) => !item.split("/").pop()?.startsWith("sha256:"));
-        for (const manifest_path of tagged_manifest) {
+        const taggedManifest = [...manifests].filter((item) => !item.split("/").pop()?.startsWith("sha256:"));
+        for (const manifestPath of taggedManifest) {
           // Tagged manifest some, load manifest content
-          const manifest = await this.registry.get(manifest_path);
+          const manifest = await this.registry.get(manifestPath);
           if (!manifest) {
             continue;
           }
@@ -249,11 +249,11 @@ export class GarbageCollector {
     // From manifest, extract referenced layers
     for (const [_, manifests] of Object.entries(manifestList)) {
       // Select only one manifest per unique manifest
-      const manifest_path = manifests.values().next().value;
-      if (manifest_path === undefined) {
+      const manifestPath = manifests.values().next().value;
+      if (manifestPath === undefined) {
         continue;
       }
-      const manifest = await this.registry.get(manifest_path);
+      const manifest = await this.registry.get(manifestPath);
       // Skip if manifest not found
       if (!manifest) continue;
 
@@ -278,8 +278,8 @@ export class GarbageCollector {
     const unreferencedBlobs = new Set<string>();
     // List blobs to be removed
     await this.list(`${options.name}/blobs/`, async (object) => {
-      const blob_hash = object.key.split("/").pop();
-      if (blob_hash && !referencedBlobs.has(blob_hash)) {
+      const blobHash = object.key.split("/").pop();
+      if (blobHash && !referencedBlobs.has(blobHash)) {
         unreferencedBlobs.add(object.key);
       }
       return true;
@@ -288,9 +288,9 @@ export class GarbageCollector {
     // Check for symlink before removal
     if (unreferencedBlobs.size >= 0) {
       await this.list("", async (object) => {
-        const object_path = object.key;
+        const objectPath = object.key;
         // Skip non-blobs object and from any other repository (symlink only target cross repository blobs)
-        if (object_path.startsWith(`${options.name}/`) || !object_path.includes("/blobs/sha256:")) {
+        if (objectPath.startsWith(`${options.name}/`) || !objectPath.includes("/blobs/sha256:")) {
           return true;
         }
         if (object.customMetadata && object.customMetadata["r2_symlink"] !== undefined) {
@@ -299,10 +299,10 @@ export class GarbageCollector {
           // Skip if manifest not found
           if (!manifest) return true;
           // Get symlink target
-          const symlink_target = await manifest.text();
-          if (unreferencedBlobs.has(symlink_target)) {
+          const symlinkTarget = await manifest.text();
+          if (unreferencedBlobs.has(symlinkTarget)) {
             // This symlink target a layer that should be removed
-            unreferencedBlobs.delete(symlink_target);
+            unreferencedBlobs.delete(symlinkTarget);
           }
         }
         return unreferencedBlobs.size > 0;

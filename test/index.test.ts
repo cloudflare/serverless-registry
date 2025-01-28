@@ -14,64 +14,61 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 
 async function generateManifest(name: string, schemaVersion: 1 | 2 = 2): Promise<ManifestSchema> {
   // Layer data
-  const layer_data = Math.random().toString(36).substring(2); // Random string data
-  const layer_sha256 = await getSHA256(layer_data);
+  const layerData = Math.random().toString(36).substring(2); // Random string data
+  const layerSha256 = await getSHA256(layerData);
   // Upload layer data
   const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
   expect(res.ok).toBeTruthy();
-  const blob = new Blob([layer_data]).stream();
-  const stream = limit(blob, layer_data.length);
+  const blob = new Blob([layerData]).stream();
+  const stream = limit(blob, layerData.length);
   const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
   expect(res2.ok).toBeTruthy();
-  const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + layer_sha256, null, {}));
+  const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + layerSha256, null, {}));
   expect(last.ok).toBeTruthy();
   // Config data
-  const config_data = Math.random().toString(36).substring(2); // Random string data
-  const config_sha256 = await getSHA256(config_data);
+  const configData = Math.random().toString(36).substring(2); // Random string data
+  const configSha256 = await getSHA256(configData);
   if (schemaVersion === 2) {
     // Upload config layer
-    const config_res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
-    expect(config_res.ok).toBeTruthy();
-    const config_blob = new Blob([config_data]).stream();
-    const config_stream = limit(config_blob, config_data.length);
-    const config_res2 = await fetch(createRequest("PATCH", config_res.headers.get("location")!, config_stream, {}));
-    expect(config_res2.ok).toBeTruthy();
-    const config_last = await fetch(
-      createRequest("PUT", config_res2.headers.get("location")! + "&digest=" + config_sha256, null, {}),
+    const configRes = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    expect(configRes.ok).toBeTruthy();
+    const configBlob = new Blob([configData]).stream();
+    const configStream = limit(configBlob, configData.length);
+    const configRes2 = await fetch(createRequest("PATCH", configRes.headers.get("location")!, configStream, {}));
+    expect(configRes2.ok).toBeTruthy();
+    const configLast = await fetch(
+      createRequest("PUT", configRes2.headers.get("location")! + "&digest=" + configSha256, null, {}),
     );
-    expect(config_last.ok).toBeTruthy();
+    expect(configLast.ok).toBeTruthy();
   }
   return schemaVersion === 1
     ? {
         schemaVersion,
-        fsLayers: [{ blobSum: layer_sha256 }],
+        fsLayers: [{ blobSum: layerSha256 }],
         architecture: "amd64",
       }
     : {
         schemaVersion,
         layers: [
-          { size: layer_data.length, digest: layer_sha256, mediaType: "shouldbeanything" },
-          { size: layer_data.length, digest: layer_sha256, mediaType: "shouldbeanything" },
+          { size: layerData.length, digest: layerSha256, mediaType: "shouldbeanything" },
+          { size: layerData.length, digest: layerSha256, mediaType: "shouldbeanything" },
         ],
-        config: { size: config_data.length, digest: config_sha256, mediaType: "configmediatypeshouldntbechecked" },
+        config: { size: configData.length, digest: configSha256, mediaType: "configmediatypeshouldntbechecked" },
         mediaType: "shouldalsobeanythingforretrocompatibility",
       };
 }
 
-async function generateManifestList(
-  amd_manifest: ManifestSchema,
-  arm_manifest: ManifestSchema,
-): Promise<ManifestSchema> {
-  const amd_manifest_data = JSON.stringify(amd_manifest);
-  const arm_manifest_data = JSON.stringify(arm_manifest);
+async function generateManifestList(amdManifest: ManifestSchema, armManifest: ManifestSchema): Promise<ManifestSchema> {
+  const amdManifestData = JSON.stringify(amdManifest);
+  const armManifestData = JSON.stringify(armManifest);
   return {
     schemaVersion: 2,
     mediaType: "application/vnd.docker.distribution.manifest.list.v2+json",
     manifests: [
       {
         mediaType: "application/vnd.docker.distribution.manifest.v2+json",
-        size: amd_manifest_data.length,
-        digest: await getSHA256(amd_manifest_data),
+        size: amdManifestData.length,
+        digest: await getSHA256(amdManifestData),
         platform: {
           architecture: "amd64",
           os: "linux",
@@ -79,8 +76,8 @@ async function generateManifestList(
       },
       {
         mediaType: "application/vnd.docker.distribution.manifest.v2+json",
-        size: arm_manifest_data.length,
-        digest: await getSHA256(arm_manifest_data),
+        size: armManifestData.length,
+        digest: await getSHA256(armManifestData),
         platform: {
           architecture: "arm64",
           os: "linux",
@@ -205,36 +202,36 @@ async function createManifest(name: string, schema: ManifestSchema, tag?: string
 }
 
 function getLayersFromManifest(schema: ManifestSchema): string[] {
-  const layers_digest = [];
+  const layersDigest = [];
   if (schema.schemaVersion === 1) {
     for (const layer of schema.fsLayers) {
-      layers_digest.push(layer.blobSum);
+      layersDigest.push(layer.blobSum);
     }
   } else if (schema.schemaVersion === 2 && !("manifests" in schema)) {
-    layers_digest.push(schema.config.digest);
+    layersDigest.push(schema.config.digest);
     for (const layer of schema.layers) {
-      layers_digest.push(layer.digest);
+      layersDigest.push(layer.digest);
     }
   }
-  return layers_digest;
+  return layersDigest;
 }
 
 async function mountLayersFromManifest(from: string, schema: ManifestSchema, name: string): Promise<number> {
-  const layers_digest = getLayersFromManifest(schema);
+  const layersDigest = getLayersFromManifest(schema);
 
-  for (const layer_digest of layers_digest) {
+  for (const layerDigest of layersDigest) {
     const res = await fetch(
-      createRequest("POST", `/v2/${name}/blobs/uploads/?from=${from}&mount=${layer_digest}`, null, {}),
+      createRequest("POST", `/v2/${name}/blobs/uploads/?from=${from}&mount=${layerDigest}`, null, {}),
     );
     if (!res.ok) {
       throw new Error(await res.text());
     }
     expect(res.ok).toBeTruthy();
     expect(res.status).toEqual(201);
-    expect(res.headers.get("docker-content-digest")).toEqual(layer_digest);
+    expect(res.headers.get("docker-content-digest")).toEqual(layerDigest);
   }
 
-  return layers_digest.length;
+  return layersDigest.length;
 }
 
 describe("v2 manifests", () => {
@@ -324,9 +321,9 @@ describe("v2 manifests", () => {
   });
 
   test("PUT then list tags with GET /v2/:name/tags/list", async () => {
-    const manifest_list = new Set<string>();
+    const manifestList = new Set<string>();
     const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
-    manifest_list.add(sha256);
+    manifestList.add(sha256);
     const expectedRes = ["hello", sha256];
     for (let i = 0; i < 40; i++) {
       expectedRes.push(`hello-${i}`);
@@ -336,7 +333,7 @@ describe("v2 manifests", () => {
     const shuffledRes = shuffleArray([...expectedRes]);
     for (const tag of shuffledRes) {
       const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), tag);
-      manifest_list.add(sha256);
+      manifestList.add(sha256);
     }
 
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list?n=1000`, null));
@@ -344,8 +341,8 @@ describe("v2 manifests", () => {
     expect(tags.name).toEqual("hello-world-list");
     expect(tags.tags).containSubset(expectedRes); // TODO this test will be overwrite by PR #89 once merged
 
-    for (const manifest_sha256 of manifest_list) {
-      const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${manifest_sha256}`, null));
+    for (const manifestSha256 of manifestList) {
+      const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${manifestSha256}`, null));
       expect(res.ok).toBeTruthy();
     }
     const tagsResEmpty = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list`, null));
@@ -354,60 +351,60 @@ describe("v2 manifests", () => {
   });
 
   test("Upload manifests with recursive layer mounting", async () => {
-    const repo_a = "app-a";
-    const repo_b = "app-b";
-    const repo_c = "app-c";
+    const repoA = "app-a";
+    const repoB = "app-b";
+    const repoC = "app-c";
 
     // Generate manifest
-    const app_manifest = await generateManifest(repo_a);
+    const appManifest = await generateManifest(repoA);
     // Create architecture specific repository
-    await createManifest(repo_a, app_manifest, `latest`);
+    await createManifest(repoA, appManifest, `latest`);
 
-    // Upload app from repo_a to repo_b
-    await mountLayersFromManifest(repo_a, app_manifest, repo_b);
-    await createManifest(repo_b, app_manifest, `latest`);
+    // Upload app from repoA to repoB
+    await mountLayersFromManifest(repoA, appManifest, repoB);
+    await createManifest(repoB, appManifest, `latest`);
 
-    // Upload app from repo_b to repo_c
-    await mountLayersFromManifest(repo_b, app_manifest, repo_c);
-    await createManifest(repo_c, app_manifest, `latest`);
+    // Upload app from repoB to repoC
+    await mountLayersFromManifest(repoB, appManifest, repoC);
+    await createManifest(repoC, appManifest, `latest`);
 
     const bindings = env as Env;
     // Check manifest count
     {
-      const manifest_count_a = (await bindings.REGISTRY.list({ prefix: `${repo_a}/manifests/` })).objects.length;
-      const manifest_count_b = (await bindings.REGISTRY.list({ prefix: `${repo_b}/manifests/` })).objects.length;
-      const manifest_count_c = (await bindings.REGISTRY.list({ prefix: `${repo_c}/manifests/` })).objects.length;
-      expect(manifest_count_a).toEqual(manifest_count_b);
-      expect(manifest_count_a).toEqual(manifest_count_c);
+      const manifestCountA = (await bindings.REGISTRY.list({ prefix: `${repoA}/manifests/` })).objects.length;
+      const manifestCountB = (await bindings.REGISTRY.list({ prefix: `${repoB}/manifests/` })).objects.length;
+      const manifestCountC = (await bindings.REGISTRY.list({ prefix: `${repoC}/manifests/` })).objects.length;
+      expect(manifestCountA).toEqual(manifestCountB);
+      expect(manifestCountA).toEqual(manifestCountC);
     }
     // Check blobs count
     {
-      const layers_count_a = (await bindings.REGISTRY.list({ prefix: `${repo_a}/blobs/` })).objects.length;
-      const layers_count_b = (await bindings.REGISTRY.list({ prefix: `${repo_b}/blobs/` })).objects.length;
-      const layers_count_c = (await bindings.REGISTRY.list({ prefix: `${repo_c}/blobs/` })).objects.length;
-      expect(layers_count_a).toEqual(layers_count_b);
-      expect(layers_count_a).toEqual(layers_count_c);
+      const layersCountA = (await bindings.REGISTRY.list({ prefix: `${repoA}/blobs/` })).objects.length;
+      const layersCountB = (await bindings.REGISTRY.list({ prefix: `${repoB}/blobs/` })).objects.length;
+      const layersCountC = (await bindings.REGISTRY.list({ prefix: `${repoC}/blobs/` })).objects.length;
+      expect(layersCountA).toEqual(layersCountB);
+      expect(layersCountA).toEqual(layersCountC);
     }
     // Check symlink direct layer target
-    for (const layer of getLayersFromManifest(app_manifest)) {
-      const repo_b_layer = await bindings.REGISTRY.get(`${repo_b}/blobs/${layer}`);
-      const repo_c_layer = await bindings.REGISTRY.get(`${repo_c}/blobs/${layer}`);
-      expect(repo_b_layer).not.toBeNull();
-      expect(repo_c_layer).not.toBeNull();
-      if (repo_b_layer !== null && repo_c_layer !== null) {
+    for (const layer of getLayersFromManifest(appManifest)) {
+      const repoLayerB = await bindings.REGISTRY.get(`${repoB}/blobs/${layer}`);
+      const repoLayerC = await bindings.REGISTRY.get(`${repoC}/blobs/${layer}`);
+      expect(repoLayerB).not.toBeNull();
+      expect(repoLayerC).not.toBeNull();
+      if (repoLayerB !== null && repoLayerC !== null) {
         // Check if both symlink target the same original blob
-        expect(await repo_b_layer.text()).toEqual(`${repo_a}/blobs/${layer}`);
-        expect(await repo_c_layer.text()).toEqual(`${repo_a}/blobs/${layer}`);
+        expect(await repoLayerB.text()).toEqual(`${repoA}/blobs/${layer}`);
+        expect(await repoLayerC.text()).toEqual(`${repoA}/blobs/${layer}`);
         // Check layer download follow symlink
-        const layer_source = await fetch(createRequest("GET", `/v2/${repo_a}/blobs/${layer}`, null));
-        expect(layer_source.ok).toBeTruthy();
-        const source_data = await layer_source.bytes();
-        const layer_b = await fetch(createRequest("GET", `/v2/${repo_b}/blobs/${layer}`, null));
-        expect(layer_b.ok).toBeTruthy();
-        const layer_c = await fetch(createRequest("GET", `/v2/${repo_c}/blobs/${layer}`, null));
-        expect(layer_c.ok).toBeTruthy();
-        expect(await layer_b.bytes()).toEqual(source_data);
-        expect(await layer_c.bytes()).toEqual(source_data);
+        const layerSource = await fetch(createRequest("GET", `/v2/${repoA}/blobs/${layer}`, null));
+        expect(layerSource.ok).toBeTruthy();
+        const sourceData = await layerSource.bytes();
+        const layerB = await fetch(createRequest("GET", `/v2/${repoB}/blobs/${layer}`, null));
+        expect(layerB.ok).toBeTruthy();
+        const layerC = await fetch(createRequest("GET", `/v2/${repoC}/blobs/${layer}`, null));
+        expect(layerC.ok).toBeTruthy();
+        expect(await layerB.bytes()).toEqual(sourceData);
+        expect(await layerC.bytes()).toEqual(sourceData);
       }
     }
   });
@@ -749,29 +746,29 @@ describe("push and catalog", () => {
 
 async function createManifestList(name: string, tag?: string): Promise<string[]> {
   // Generate manifest
-  const amd_manifest = await generateManifest(name);
-  const arm_manifest = await generateManifest(name);
-  const manifest_list = await generateManifestList(amd_manifest, arm_manifest);
+  const amdManifest = await generateManifest(name);
+  const armManifest = await generateManifest(name);
+  const manifestList = await generateManifestList(amdManifest, armManifest);
 
   if (!tag) {
-    const manifest_list_data = JSON.stringify(manifest_list);
-    tag = await getSHA256(manifest_list_data);
+    const manifestListData = JSON.stringify(manifestList);
+    tag = await getSHA256(manifestListData);
   }
-  const { sha256: amd_sha256 } = await createManifest(name, amd_manifest);
-  const { sha256: arm_sha256 } = await createManifest(name, arm_manifest);
-  const { sha256 } = await createManifest(name, manifest_list, tag);
-  return [amd_sha256, arm_sha256, sha256];
+  const { sha256: amdSha256 } = await createManifest(name, amdManifest);
+  const { sha256: armSha256 } = await createManifest(name, armManifest);
+  const { sha256 } = await createManifest(name, manifestList, tag);
+  return [amdSha256, armSha256, sha256];
 }
 
 describe("v2 manifest-list", () => {
   test("Upload manifest-list", async () => {
     const name = "m-arch";
     const tag = "app";
-    const manifests_sha256 = await createManifestList(name, tag);
+    const manifestsSha256 = await createManifestList(name, tag);
 
     const bindings = env as Env;
     expect(await bindings.REGISTRY.head(`${name}/manifests/${tag}`)).toBeTruthy();
-    for (const digest of manifests_sha256) {
+    for (const digest of manifestsSha256) {
       expect(await bindings.REGISTRY.head(`${name}/manifests/${digest}`)).toBeTruthy();
     }
 
@@ -779,7 +776,7 @@ describe("v2 manifest-list", () => {
     const res = await fetch(createRequest("DELETE", `/v2/${name}/manifests/${tag}`, null));
     expect(res.status).toEqual(202);
     expect(await bindings.REGISTRY.head(`${name}/manifests/${tag}`)).toBeNull();
-    for (const digest of manifests_sha256) {
+    for (const digest of manifestsSha256) {
       expect(await bindings.REGISTRY.head(`${name}/manifests/${digest}`)).toBeTruthy();
     }
 
@@ -789,64 +786,64 @@ describe("v2 manifest-list", () => {
       expect(listObjects.objects.length).toEqual(4);
     }
 
-    for (const digest of manifests_sha256) {
+    for (const digest of manifestsSha256) {
       const res = await fetch(createRequest("DELETE", `/v2/${name}/manifests/${digest}`, null));
       expect(res.status).toEqual(202);
     }
-    for (const digest of manifests_sha256) {
+    for (const digest of manifestsSha256) {
       expect(await bindings.REGISTRY.head(`${name}/manifests/${digest}`)).toBeNull();
     }
   });
 
   test("Upload manifest-list with layer mounting", async () => {
-    const preprod_name = "m-arch-pp";
-    const prod_name = "m-arch";
+    const preprodName = "m-arch-pp";
+    const prodName = "m-arch";
     const tag = "app";
     // Generate manifest
-    const amd_manifest = await generateManifest(preprod_name);
-    const arm_manifest = await generateManifest(preprod_name);
+    const amdManifest = await generateManifest(preprodName);
+    const armManifest = await generateManifest(preprodName);
     // Create architecture specific repository
-    await createManifest(preprod_name, amd_manifest, `${tag}-amd`);
-    await createManifest(preprod_name, arm_manifest, `${tag}-arm`);
+    await createManifest(preprodName, amdManifest, `${tag}-amd`);
+    await createManifest(preprodName, armManifest, `${tag}-arm`);
 
     // Create manifest-list on prod repository
     const bindings = env as Env;
     // Step 1 mount blobs
-    await mountLayersFromManifest(preprod_name, amd_manifest, prod_name);
-    await mountLayersFromManifest(preprod_name, arm_manifest, prod_name);
+    await mountLayersFromManifest(preprodName, amdManifest, prodName);
+    await mountLayersFromManifest(preprodName, armManifest, prodName);
     // Check blobs count (2 config and 2 layer)
     {
-      const listObjects = await bindings.REGISTRY.list({ prefix: `${preprod_name}/blobs/` });
+      const listObjects = await bindings.REGISTRY.list({ prefix: `${preprodName}/blobs/` });
       expect(listObjects.objects.length).toEqual(4);
     }
     {
-      const listObjects = await bindings.REGISTRY.list({ prefix: `${prod_name}/blobs/` });
+      const listObjects = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listObjects.objects.length).toEqual(4);
     }
 
     // Step 2 create manifest
-    const { sha256: amd_sha256 } = await createManifest(prod_name, amd_manifest);
-    const { sha256: arm_sha256 } = await createManifest(prod_name, arm_manifest);
+    const { sha256: amdSha256 } = await createManifest(prodName, amdManifest);
+    const { sha256: armSha256 } = await createManifest(prodName, armManifest);
 
     // Step 3 create manifest list
-    const manifest_list = await generateManifestList(amd_manifest, arm_manifest);
-    const { sha256 } = await createManifest(prod_name, manifest_list, tag);
+    const manifestList = await generateManifestList(amdManifest, armManifest);
+    const { sha256 } = await createManifest(prodName, manifestList, tag);
 
-    expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${tag}`)).toBeTruthy();
-    expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${sha256}`)).toBeTruthy();
-    expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${amd_sha256}`)).toBeTruthy();
-    expect(await bindings.REGISTRY.head(`${prod_name}/manifests/${arm_sha256}`)).toBeTruthy();
+    expect(await bindings.REGISTRY.head(`${prodName}/manifests/${tag}`)).toBeTruthy();
+    expect(await bindings.REGISTRY.head(`${prodName}/manifests/${sha256}`)).toBeTruthy();
+    expect(await bindings.REGISTRY.head(`${prodName}/manifests/${amdSha256}`)).toBeTruthy();
+    expect(await bindings.REGISTRY.head(`${prodName}/manifests/${armSha256}`)).toBeTruthy();
 
     // Check symlink binding
-    expect(amd_manifest.schemaVersion === 2).toBeTruthy();
-    expect("manifests" in amd_manifest).toBeFalsy();
-    if (amd_manifest.schemaVersion === 2 && !("manifests" in amd_manifest)) {
-      const layer_digest = amd_manifest.layers[0].digest;
-      const layer_source = await fetch(createRequest("GET", `/v2/${preprod_name}/blobs/${layer_digest}`, null));
-      expect(layer_source.ok).toBeTruthy();
-      const layer_linked = await fetch(createRequest("GET", `/v2/${prod_name}/blobs/${layer_digest}`, null));
-      expect(layer_linked.ok).toBeTruthy();
-      expect(await layer_linked.text()).toEqual(await layer_source.text());
+    expect(amdManifest.schemaVersion === 2).toBeTruthy();
+    expect("manifests" in amdManifest).toBeFalsy();
+    if (amdManifest.schemaVersion === 2 && !("manifests" in amdManifest)) {
+      const layerDigest = amdManifest.layers[0].digest;
+      const layerSource = await fetch(createRequest("GET", `/v2/${preprodName}/blobs/${layerDigest}`, null));
+      expect(layerSource.ok).toBeTruthy();
+      const layerLinked = await fetch(createRequest("GET", `/v2/${prodName}/blobs/${layerDigest}`, null));
+      expect(layerLinked.ok).toBeTruthy();
+      expect(await layerLinked.text()).toEqual(await layerSource.text());
     }
   });
 });
@@ -875,11 +872,11 @@ async function runGarbageCollector(name: string, mode: "unreferenced" | "untagge
 describe("garbage collector", () => {
   test("Single arch image", async () => {
     const name = "hello";
-    const manifest_old = await generateManifest(name);
-    await createManifest(name, manifest_old, "v1");
-    const manifest_latest = await generateManifest(name);
-    await createManifest(name, manifest_latest, "v2");
-    await createManifest(name, manifest_latest, "app");
+    const manifestOld = await generateManifest(name);
+    await createManifest(name, manifestOld, "v1");
+    const manifestLatest = await generateManifest(name);
+    await createManifest(name, manifestLatest, "v2");
+    await createManifest(name, manifestLatest, "app");
     const bindings = env as Env;
     // Check no action needed
     {
@@ -916,8 +913,8 @@ describe("garbage collector", () => {
     }
     // Add an unreferenced blobs
     {
-      const { sha256: temp_sha256 } = await createManifest(name, await generateManifest(name));
-      const res = await fetch(createRequest("DELETE", `/v2/${name}/manifests/${temp_sha256}`, null));
+      const { sha256: tempSha256 } = await createManifest(name, await generateManifest(name));
+      const res = await fetch(createRequest("DELETE", `/v2/${name}/manifests/${tempSha256}`, null));
       expect(res.status).toEqual(202);
     }
     // Removed manifest - GC unreferenced mode will clean blobs
@@ -1016,92 +1013,92 @@ describe("garbage collector", () => {
 
   test("Multi-arch image with symlink layers", async () => {
     // Deploy multi-repo multi-arch image
-    const preprod_name = "m-arch-pp";
-    const prod_name = "m-arch";
+    const preprodBame = "m-arch-pp";
+    const prodName = "m-arch";
     const tag = "app";
     // Generate manifest
-    const amd_manifest = await generateManifest(preprod_name);
-    const arm_manifest = await generateManifest(preprod_name);
+    const amdManifest = await generateManifest(preprodBame);
+    const armManifest = await generateManifest(preprodBame);
     // Create architecture specific repository
-    await createManifest(preprod_name, amd_manifest, `${tag}-amd`);
-    await createManifest(preprod_name, arm_manifest, `${tag}-arm`);
+    await createManifest(preprodBame, amdManifest, `${tag}-amd`);
+    await createManifest(preprodBame, armManifest, `${tag}-arm`);
 
     // Create manifest-list on prod repository
     const bindings = env as Env;
     // Step 1 mount blobs
-    await mountLayersFromManifest(preprod_name, amd_manifest, prod_name);
-    await mountLayersFromManifest(preprod_name, arm_manifest, prod_name);
+    await mountLayersFromManifest(preprodBame, amdManifest, prodName);
+    await mountLayersFromManifest(preprodBame, armManifest, prodName);
 
     // Step 2 create manifest
-    await createManifest(prod_name, amd_manifest);
-    await createManifest(prod_name, arm_manifest);
+    await createManifest(prodName, amdManifest);
+    await createManifest(prodName, armManifest);
 
     // Step 3 create manifest list
-    const manifest_list = await generateManifestList(amd_manifest, arm_manifest);
-    await createManifest(prod_name, manifest_list, tag);
+    const manifestList = await generateManifestList(amdManifest, armManifest);
+    await createManifest(prodName, manifestList, tag);
 
     // Check no action needed
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprodBame}/manifests/` });
       expect(listManifests.objects.length).toEqual(4);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprodBame}/blobs/` });
       expect(listBlobs.objects.length).toEqual(4);
     }
 
-    await runGarbageCollector(preprod_name, "both");
+    await runGarbageCollector(preprodBame, "both");
 
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprodBame}/manifests/` });
       expect(listManifests.objects.length).toEqual(4);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprodBame}/blobs/` });
       expect(listBlobs.objects.length).toEqual(4);
     }
 
     // Untagged preprod repo
     {
-      const res = await fetch(createRequest("DELETE", `/v2/${preprod_name}/manifests/${tag}-amd`, null));
+      const res = await fetch(createRequest("DELETE", `/v2/${preprodBame}/manifests/${tag}-amd`, null));
       expect(res.status).toEqual(202);
-      const res2 = await fetch(createRequest("DELETE", `/v2/${preprod_name}/manifests/${tag}-arm`, null));
+      const res2 = await fetch(createRequest("DELETE", `/v2/${preprodBame}/manifests/${tag}-arm`, null));
       expect(res2.status).toEqual(202);
     }
-    await runGarbageCollector(preprod_name, "unreferenced");
+    await runGarbageCollector(preprodBame, "unreferenced");
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprodBame}/manifests/` });
       expect(listManifests.objects.length).toEqual(2);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprodBame}/blobs/` });
       expect(listBlobs.objects.length).toEqual(4);
     }
-    await runGarbageCollector(preprod_name, "untagged");
+    await runGarbageCollector(preprodBame, "untagged");
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${preprodBame}/manifests/` });
       expect(listManifests.objects.length).toEqual(0);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${preprodBame}/blobs/` });
       expect(listBlobs.objects.length).toEqual(4);
     }
 
     // Untagged prod repo
     {
-      const res = await fetch(createRequest("DELETE", `/v2/${prod_name}/manifests/${tag}`, null));
+      const res = await fetch(createRequest("DELETE", `/v2/${prodName}/manifests/${tag}`, null));
       expect(res.status).toEqual(202);
     }
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${prod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${prodName}/manifests/` });
       expect(listManifests.objects.length).toEqual(3);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listBlobs.objects.length).toEqual(4);
     }
-    await runGarbageCollector(prod_name, "untagged");
+    await runGarbageCollector(prodName, "untagged");
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${prod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${prodName}/manifests/` });
       expect(listManifests.objects.length).toEqual(0);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listBlobs.objects.length).toEqual(0);
     }
-    await runGarbageCollector(preprod_name, "unreferenced");
+    await runGarbageCollector(preprodBame, "unreferenced");
     {
-      const listManifests = await bindings.REGISTRY.list({ prefix: `${prod_name}/manifests/` });
+      const listManifests = await bindings.REGISTRY.list({ prefix: `${prodName}/manifests/` });
       expect(listManifests.objects.length).toEqual(0);
-      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prod_name}/blobs/` });
+      const listBlobs = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listBlobs.objects.length).toEqual(0);
     }
   });

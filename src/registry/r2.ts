@@ -376,35 +376,35 @@ export class R2Registry implements Registry {
   }
 
   async mountExistingLayer(
-    source_name: string,
+    sourceName: string,
     digest: string,
-    destination_name: string,
+    destinationName: string,
   ): Promise<RegistryError | FinishedUploadObject> {
-    const source_layer_path = `${source_name}/blobs/${digest}`;
-    const [res, err] = await wrap(this.env.REGISTRY.head(source_layer_path));
+    const sourceLayerPath = `${sourceName}/blobs/${digest}`;
+    const [res, err] = await wrap(this.env.REGISTRY.head(sourceLayerPath));
     if (err) {
       return wrapError("mountExistingLayer", err);
     }
     if (!res) {
       return wrapError("mountExistingLayer", "Layer not found");
     } else {
-      const destination_layer_path = `${destination_name}/blobs/${digest}`;
-      if (source_layer_path === destination_layer_path) {
+      const destinationLayerPath = `${destinationName}/blobs/${digest}`;
+      if (sourceLayerPath === destinationLayerPath) {
         // Bad request
         throw new InternalError();
       }
       // Prevent recursive symlink
       if (res.customMetadata && "r2_symlink" in res.customMetadata) {
-        return await this.mountExistingLayer(res.customMetadata.r2_symlink, digest, destination_name);
+        return await this.mountExistingLayer(res.customMetadata.r2_symlink, digest, destinationName);
       }
-      // Trying to mount a layer from source_layer_path to destination_layer_path
+      // Trying to mount a layer from sourceLayerPath to destinationLayerPath
 
       // Create linked file with custom metadata
       const [newFile, error] = await wrap(
-        this.env.REGISTRY.put(destination_layer_path, source_layer_path, {
-          sha256: await getSHA256(source_layer_path, ""),
+        this.env.REGISTRY.put(destinationLayerPath, sourceLayerPath, {
+          sha256: await getSHA256(sourceLayerPath, ""),
           httpMetadata: res.httpMetadata,
-          customMetadata: { r2_symlink: source_name },  // Storing target repository name in metadata (to easily resolve recursive layer mounting)
+          customMetadata: { r2_symlink: sourceName }, // Storing target repository name in metadata (to easily resolve recursive layer mounting)
         }),
       );
       if (error) {
@@ -416,7 +416,7 @@ export class R2Registry implements Registry {
 
       return {
         digest: hexToDigest(res.checksums.sha256!),
-        location: `/v2/${destination_layer_path}`,
+        location: `/v2/${destinationLayerPath}`,
       };
     }
   }
