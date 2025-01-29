@@ -454,15 +454,15 @@ export class R2Registry implements Registry {
 
     // Handle R2 symlink
     if (res.customMetadata && "r2_symlink" in res.customMetadata) {
-      const layer_path = await res.text();
-      // Symlink detected! Will download layer from "layer_path"
-      const [link_name, link_digest] = layer_path.split("/blobs/");
-      if (link_name == name && link_digest == digest) {
+      const layerPath = await res.text();
+      // Symlink detected! Will download layer from "layerPath"
+      const [linkName, linkDigest] = layerPath.split("/blobs/");
+      if (linkName == name && linkDigest == digest) {
         return {
           response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
         };
       }
-      return await this.env.REGISTRY_CLIENT.getLayer(link_name, link_digest);
+      return await this.env.REGISTRY_CLIENT.getLayer(linkName, linkDigest);
     }
 
     return {
