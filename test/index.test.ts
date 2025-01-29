@@ -324,7 +324,7 @@ describe("v2 manifests", () => {
     const manifestList = new Set<string>();
     const { sha256 } = await createManifest("hello-world-list", await generateManifest("hello-world-list"), `hello`);
     manifestList.add(sha256);
-    const expectedRes = ["hello", sha256];
+    const expectedRes = ["hello"];
     for (let i = 0; i < 40; i++) {
       expectedRes.push(`hello-${i}`);
     }
@@ -339,7 +339,7 @@ describe("v2 manifests", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-list/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-list");
-    expect(tags.tags).containSubset(expectedRes); // TODO this test will be overwrite by PR #89 once merged
+    expect(tags.tags).toEqual(expectedRes);
 
     for (const manifestSha256 of manifestList) {
       const res = await fetch(createRequest("DELETE", `/v2/hello-world-list/manifests/${manifestSha256}`, null));
@@ -654,7 +654,11 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).containSubset(["hello", "hello-2", "latest"]); // TODO this test will be overwrite by PR #89 once merged
+    expect(tags.tags).toEqual([
+      "hello",
+      "hello-2",
+      "latest",
+    ]);
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -707,7 +711,11 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).containSubset(["hello", "hello-2", "latest"]); // TODO this test will be overwrite by PR #89 once merged
+    expect(tags.tags).toEqual([
+      "hello",
+      "hello-2",
+      "latest",
+    ]);
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
