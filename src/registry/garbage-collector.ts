@@ -295,15 +295,17 @@ export class GarbageCollector {
           return true;
         }
         if (object.customMetadata && object.customMetadata[symlinkHeader] !== undefined) {
-          // Find symlink target
-          const manifest = await this.registry.get(object.key);
-          // Skip if manifest not found
-          if (!manifest) return true;
-          // Get symlink target
-          const symlinkTarget = await manifest.text();
-          if (unreferencedBlobs.has(symlinkTarget)) {
+          // Check if the symlink target the current GC repository
+          if (object.customMetadata[symlinkHeader] !== options.name) return true;
+          // Get symlink blob to retrieve its target
+          const symlinkBlob = await this.registry.get(object.key);
+          // Skip if symlinkBlob not found
+          if (!symlinkBlob) return true;
+          // Get the path of the target blob from the symlink blob
+          const targetBlobPath = await symlinkBlob.text();
+          if (unreferencedBlobs.has(targetBlobPath)) {
             // This symlink target a layer that should be removed
-            unreferencedBlobs.delete(symlinkTarget);
+            unreferencedBlobs.delete(targetBlobPath);
           }
         }
         return unreferencedBlobs.size > 0;
