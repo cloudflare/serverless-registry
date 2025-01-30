@@ -4,6 +4,7 @@
 
 import { ManifestSchema } from "../manifest";
 import { hexToDigest } from "../user";
+import {symlinkHeader} from "./r2";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -293,7 +294,7 @@ export class GarbageCollector {
         if (objectPath.startsWith(`${options.name}/`) || !objectPath.includes("/blobs/sha256:")) {
           return true;
         }
-        if (object.customMetadata && object.customMetadata["r2_symlink"] !== undefined) {
+        if (object.customMetadata && object.customMetadata[symlinkHeader] !== undefined) {
           // Find symlink target
           const manifest = await this.registry.get(object.key);
           // Skip if manifest not found

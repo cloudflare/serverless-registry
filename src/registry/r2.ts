@@ -101,6 +101,8 @@ export async function encodeState(state: State, env: Env): Promise<{ jwt: string
   return { jwt: jwtSignature, hash: await getSHA256(jwtSignature, "") };
 }
 
+export const symlinkHeader = "X-Serverless-Registry-Symlink";
+
 export async function getUploadState(
   name: string,
   uploadId: string,
@@ -394,8 +396,8 @@ export class R2Registry implements Registry {
         throw new InternalError();
       }
       // Prevent recursive symlink
-      if (res.customMetadata && "r2_symlink" in res.customMetadata) {
-        return await this.mountExistingLayer(res.customMetadata.r2_symlink, digest, destinationName);
+      if (res.customMetadata && symlinkHeader in res.customMetadata) {
+        return await this.mountExistingLayer(res.customMetadata[symlinkHeader], digest, destinationName);
       }
       // Trying to mount a layer from sourceLayerPath to destinationLayerPath
 
@@ -404,7 +406,7 @@ export class R2Registry implements Registry {
         this.env.REGISTRY.put(destinationLayerPath, sourceLayerPath, {
           sha256: await getSHA256(sourceLayerPath, ""),
           httpMetadata: res.httpMetadata,
-          customMetadata: { r2_symlink: sourceName }, // Storing target repository name in metadata (to easily resolve recursive layer mounting)
+          customMetadata: { [symlinkHeader]: sourceName }, // Storing target repository name in metadata (to easily resolve recursive layer mounting)
         }),
       );
       if (error) {
@@ -453,7 +455,7 @@ export class R2Registry implements Registry {
     }
 
     // Handle R2 symlink
-    if (res.customMetadata && "r2_symlink" in res.customMetadata) {
+    if (res.customMetadata && symlinkHeader in res.customMetadata) {
       const layerPath = await res.text();
       // Symlink detected! Will download layer from "layerPath"
       const [linkName, linkDigest] = layerPath.split("/blobs/");
