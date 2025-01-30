@@ -456,6 +456,14 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
+  mountExistingLayer(
+    _sourceName: string,
+    _digest: string,
+    _destinationName: string,
+  ): Promise<RegistryError | FinishedUploadObject> {
+    throw new Error("unimplemented");
+  }
+
   putManifest(
     _namespace: string,
     _reference: string,

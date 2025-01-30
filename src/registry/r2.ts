@@ -101,6 +101,8 @@ export async function encodeState(state: State, env: Env): Promise<{ jwt: string
   return { jwt: jwtSignature, hash: await getSHA256(jwtSignature, "") };
 }
 
+export const symlinkHeader = "X-Serverless-Registry-Symlink";
+
 export async function getUploadState(
   name: string,
   uploadId: string,
@@ -150,14 +152,12 @@ export class R2Registry implements Registry {
       return { response: new ServerError("invalid checksum from R2 backend") };
     }
 
-    const checkManifestResponse = {
+    return {
       exists: true,
       digest: hexToDigest(res.checksums.sha256!),
       contentType: res.httpMetadata!.contentType!,
       size: res.size,
     };
-
-    return checkManifestResponse;
   }
 
   async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
@@ -377,6 +377,52 @@ export class R2Registry implements Registry {
     };
   }
 
+  async mountExistingLayer(
+    sourceName: string,
+    digest: string,
+    destinationName: string,
+  ): Promise<RegistryError | FinishedUploadObject> {
+    const sourceLayerPath = `${sourceName}/blobs/${digest}`;
+    const [res, err] = await wrap(this.env.REGISTRY.head(sourceLayerPath));
+    if (err) {
+      return wrapError("mountExistingLayer", err);
+    }
+    if (!res) {
+      return wrapError("mountExistingLayer", "Layer not found");
+    } else {
+      const destinationLayerPath = `${destinationName}/blobs/${digest}`;
+      if (sourceLayerPath === destinationLayerPath) {
+        // Bad request
+        throw new InternalError();
+      }
+      // Prevent recursive symlink
+      if (res.customMetadata && symlinkHeader in res.customMetadata) {
+        return await this.mountExistingLayer(res.customMetadata[symlinkHeader], digest, destinationName);
+      }
+      // Trying to mount a layer from sourceLayerPath to destinationLayerPath
+
+      // Create linked file with custom metadata
+      const [newFile, error] = await wrap(
+        this.env.REGISTRY.put(destinationLayerPath, sourceLayerPath, {
+          sha256: await getSHA256(sourceLayerPath, ""),
+          httpMetadata: res.httpMetadata,
+          customMetadata: { [symlinkHeader]: sourceName }, // Storing target repository name in metadata (to easily resolve recursive layer mounting)
+        }),
+      );
+      if (error) {
+        return wrapError("mountExistingLayer", error);
+      }
+      if (newFile && "response" in newFile) {
+        return wrapError("mountExistingLayer", newFile.response);
+      }
+
+      return {
+        digest: hexToDigest(res.checksums.sha256!),
+        location: `/v2/${destinationLayerPath}`,
+      };
+    }
+  }
+
   async layerExists(name: string, tag: string): Promise<RegistryError | CheckLayerResponse> {
     const [res, err] = await wrap(this.env.REGISTRY.head(`${name}/blobs/${tag}`));
     if (err) {
@@ -406,6 +452,19 @@ export class R2Registry implements Registry {
       return {
         response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
       };
+    }
+
+    // Handle R2 symlink
+    if (res.customMetadata && symlinkHeader in res.customMetadata) {
+      const layerPath = await res.text();
+      // Symlink detected! Will download layer from "layerPath"
+      const [linkName, linkDigest] = layerPath.split("/blobs/");
+      if (linkName == name && linkDigest == digest) {
+        return {
+          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+        };
+      }
+      return await this.env.REGISTRY_CLIENT.getLayer(linkName, linkDigest);
     }
 
     return {
@@ -751,7 +810,6 @@ export class R2Registry implements Registry {
   }
 
   async garbageCollection(namespace: string, mode: GarbageCollectionMode): Promise<boolean> {
-    const result = await this.gc.collect({ name: namespace, mode: mode });
-    return result;
+    return await this.gc.collect({ name: namespace, mode: mode });
   }
 }
