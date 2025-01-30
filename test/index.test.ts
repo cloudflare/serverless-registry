@@ -22,7 +22,10 @@ async function generateManifest(name: string, schemaVersion: 1 | 2 = 2): Promise
   const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
   expect(res2.ok).toBeTruthy();
   const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
-  expect(last.ok).toBeTruthy();
+  if (!last.ok) {
+    throw new Error(await last.text());
+  }
+
   return schemaVersion === 1
     ? {
         schemaVersion,

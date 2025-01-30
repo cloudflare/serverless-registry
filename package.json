@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cfworker/base64url": "^1.12.5",
+    "@taylorzane/hash-wasm": "^0.0.11",
     "@tsndr/cloudflare-worker-jwt": "^2.5.1",
     "itty-router": "^4.0.27",
     "zod": "^3.22.4"
