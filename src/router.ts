@@ -73,7 +73,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   const tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
     limit: isNaN(limitInt) ? 1000 : limitInt,
-    startAfter: last?.toString(),
+    cursor: last?.toString(),
   });
   for (const tag of tags.objects) {
     if (!tag.checksums.sha256) {
