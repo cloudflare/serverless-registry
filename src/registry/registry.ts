@@ -114,6 +114,13 @@ export interface Registry {
   // gets the manifest by namespace + digest
   getManifest(namespace: string, digest: string): Promise<GetManifestResponse | RegistryError>;
 
+  // mount an existing layer from a repository to another
+  mountExistingLayer(
+    sourceName: string,
+    digest: string,
+    destinationName: string,
+  ): Promise<RegistryError | FinishedUploadObject>;
+
   // checks that a layer exists
   layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError>;
 
