@@ -7,3 +7,38 @@ export const ManifestTagsListTooBigError = {
     },
   ],
 };
+
+export class RegistryResponse extends Response {
+  constructor(body?: BodyInit | null, init?: ResponseInit) {
+    super(body, {
+      ...init,
+      headers: {
+        ...init?.headers,
+        "Docker-Distribution-Api-Version": "registry/2.0",
+      },
+    });
+  }
+}
+export class RegistryResponseJSON extends RegistryResponse {
+  constructor(body?: BodyInit | null, init?: ResponseInit) {
+    super(body, {
+      ...init,
+      headers: {
+        ...init?.headers,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+}
+export const DigestInvalid = (expected: string, got: string) => ({
+  errors: [
+    {
+      code: "DIGEST_INVALID",
+      message: "digests don't match",
+      detail: {
+        Expected: expected,
+        Got: got,
+      },
+    },
+  ],
+});

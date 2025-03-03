@@ -4,7 +4,7 @@
 
 import { ManifestSchema } from "../manifest";
 import { hexToDigest } from "../user";
-import {symlinkHeader} from "./r2";
+import {symlinkHeader, isReference} from "./r2";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -276,11 +276,17 @@ export class GarbageCollector {
       }
     }
 
+    const blobsReferences: {[id: string] : string} = {}
     const unreferencedBlobs = new Set<string>();
     // List blobs to be removed
     await this.list(`${options.name}/blobs/`, async (object) => {
       const blobHash = object.key.split("/").pop();
       if (blobHash && !referencedBlobs.has(blobHash)) {
+        const key = isReference(object);
+        // also push the underlying reference object
+        if (key) {
+          blobsReferences[object.key] = key;
+        }
         unreferencedBlobs.add(object.key);
       }
       return true;
@@ -306,6 +312,7 @@ export class GarbageCollector {
           if (unreferencedBlobs.has(targetBlobPath)) {
             // This symlink target a layer that should be removed
             unreferencedBlobs.delete(targetBlobPath);
+            delete blobsReferences[targetBlobPath];
           }
         }
         return unreferencedBlobs.size > 0;
@@ -319,6 +326,7 @@ export class GarbageCollector {
 
       // GC will delete unreferenced blobs
       await this.registry.delete(unreferencedBlobs.values().toArray());
+      await this.registry.delete(Object.values(blobsReferences));
     }
 
     return true;

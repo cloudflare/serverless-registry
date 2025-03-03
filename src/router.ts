@@ -418,6 +418,13 @@ v2Router.patch("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
     return new Response(null, { status: 400 });
   }
 
+  // if (req.headers.get("x-fail") === "true") {
+  //   const digest = new crypto.DigestStream("SHA-256");
+  //   req.body.pipeTo(digest);
+  //   await digest.digest;
+  //   return new Response(null, { status: 500 });
+  // }
+
   let contentLengthString = req.headers.get("Content-Length");
   let stream = req.body;
   if (!contentLengthString) {
@@ -475,6 +482,7 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   );
 
   if (err) {
+    console.error("Error uploading manifest", errorString(err));
     return new InternalError();
   }
 
