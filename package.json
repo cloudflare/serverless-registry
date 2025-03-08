@@ -23,7 +23,7 @@
     "miniflare": "3.20240909.4",
     "prettier": "3.3.3",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.0",
+    "vitest": "^2.1.9",
     "wrangler": "^3.78.7"
   },
   "engines": {
