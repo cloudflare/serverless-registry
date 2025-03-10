@@ -110,6 +110,14 @@ the target registry and setup the credentials.
 
 **Never put a registry password/token inside the wrangler.toml, please always use `wrangler secrets put`**
 
+You can also use docker.io with anonymous authentication:
+```
+REGISTRIES_JSON = "[{ \"registry\": \"https://index.docker.io/\" }]"
+```
+
+You can also set your `docker.io` credentials in the configuration to not have any rate-limiting.
+
+
 ### Known limitations
 
 Right now there is some limitations with this container registry.

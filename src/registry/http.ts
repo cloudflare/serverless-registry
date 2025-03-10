@@ -24,6 +24,11 @@ type AuthContext = {
   scope: string;
 };
 
+export function isDockerDotIO(url: URL): boolean {
+  const regex = /^https:\/\/([\w\d]+\.)?docker\.io$/;
+  return regex.test(url.origin);
+}
+
 type HTTPContext = {
   // The auth context for this request
   authContext: AuthContext;
@@ -149,14 +154,35 @@ export class RegistryHTTPClient implements Registry {
   }
 
   authBase64(): string {
+    const configuration = this.configuration;
+    if (configuration.username === undefined) {
+      return "";
+    }
+
     return btoa(this.configuration.username + ":" + this.password());
   }
 
   password(): string {
-    return (this.env as unknown as Record<string, string>)[this.configuration.password_env] ?? "";
+    const configuration = this.configuration;
+    if (configuration.username === undefined) {
+      return "";
+    }
+
+    return (this.env as unknown as Record<string, string>)[configuration.password_env] ?? "";
   }
 
   async authenticate(namespace: string): Promise<HTTPContext> {
+    const emptyAuthentication = {
+      authContext: {
+        authType: "none",
+        realm: "",
+        scope: "",
+        service: this.url.host,
+      },
+      repository: this.url.pathname,
+      accessToken: "",
+    } as const;
+
     const res = await fetch(`${this.url.protocol}//${this.url.host}/v2/`, {
       headers: {
         "User-Agent": "Docker-Client/24.0.5 (linux)",
@@ -165,16 +191,7 @@ export class RegistryHTTPClient implements Registry {
     });
 
     if (res.ok) {
-      return {
-        authContext: {
-          authType: "none",
-          realm: "",
-          scope: "",
-          service: this.url.host,
-        },
-        repository: this.url.pathname,
-        accessToken: "",
-      };
+      return emptyAuthentication;
     }
 
     if (res.status !== 401) {
@@ -212,11 +229,12 @@ export class RegistryHTTPClient implements Registry {
   async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams): Promise<Response> {
     params.delete("password");
     console.log("sending authentication parameters:", ctx.realm + "?" + params.toString());
+
     return await fetch(ctx.realm + "?" + params.toString(), {
       headers: {
-        "Authorization": "Basic " + this.authBase64(),
         "Accept": "application/json",
         "User-Agent": "Docker-Client/24.0.5 (linux)",
+        ...(this.configuration.username !== undefined ? { Authorization: "Basic " + this.authBase64() } : {}),
       },
     });
   }
@@ -227,8 +245,8 @@ export class RegistryHTTPClient implements Registry {
       // explicitely include that we don't want an offline_token.
       scope: `repository:${ctx.scope}:pull,push`,
       client_id: "r2registry",
-      grant_type: "password",
-      password: this.password(),
+      grant_type: this.configuration.username === undefined ? "none" : "password",
+      password: this.configuration.username === undefined ? "" : this.password(),
     });
     let response = await fetch(ctx.realm, {
       headers: {
@@ -313,7 +331,7 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async manifestExists(name: string, tag: string): Promise<CheckManifestResponse | RegistryError> {
-    const namespace = name.includes("/") ? name : `library/${name}`;
+    const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
@@ -342,7 +360,7 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async getManifest(name: string, digest: string): Promise<GetManifestResponse | RegistryError> {
-    const namespace = name.includes("/") ? name : `library/${name}`;
+    const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
@@ -374,7 +392,7 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async layerExists(name: string, digest: string): Promise<CheckLayerResponse | RegistryError> {
-    const namespace = name.includes("/") ? name : `library/${name}`;
+    const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
       const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
@@ -414,7 +432,7 @@ export class RegistryHTTPClient implements Registry {
   }
 
   async getLayer(name: string, digest: string): Promise<GetLayerResponse | RegistryError> {
-    const namespace = name.includes("/") ? name : `library/${name}`;
+    const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
@@ -468,7 +486,7 @@ export class RegistryHTTPClient implements Registry {
     _namespace: string,
     _reference: string,
     _readableStream: ReadableStream<any>,
-    _contentType: string,
+    {}: {},
   ): Promise<PutManifestResponse | RegistryError> {
     throw new Error("unimplemented");
   }

@@ -5,12 +5,23 @@ import z from "zod";
 import { GarbageCollectionMode } from "./garbage-collector";
 
 // Defines a registry and how it's configured
-const registryConfiguration = z.object({
-  registry: z.string().url(),
-  password_env: z.string(),
-  username: z.string(),
-});
-
+const registryConfiguration = z
+  .object({
+    registry: z.string().url(),
+  })
+  .and(
+    z
+      .object({
+        password_env: z.string(),
+        username: z.string(),
+      })
+      .or(
+        z.object({
+          username: z.undefined(),
+          password: z.undefined(),
+        }),
+      ),
+  );
 export type RegistryConfiguration = z.infer<typeof registryConfiguration>;
 
 export function registries(env: Env): RegistryConfiguration[] {
@@ -132,7 +143,10 @@ export interface Registry {
     namespace: string,
     reference: string,
     readableStream: ReadableStream<any>,
-    contentType: string,
+    options: {
+      contentType: string;
+      checkLayers?: boolean;
+    },
   ): Promise<PutManifestResponse | RegistryError>;
 
   // starts a new upload
