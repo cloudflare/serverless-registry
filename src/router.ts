@@ -149,7 +149,10 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
         }
 
         const [putResponse, err] = await wrap(
-          env.REGISTRY_CLIENT.putManifest(name, reference, manifestResponse.stream, manifestResponse.contentType),
+          env.REGISTRY_CLIENT.putManifest(name, reference, manifestResponse.stream, {
+            contentType: manifestResponse.contentType,
+            checkLayers: false,
+          }),
         );
         if (err) {
           console.error("Error sync manifest into client:", errorString(err));
@@ -209,7 +212,10 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
     context.waitUntil(
       (async () => {
         const [response, err] = await wrap(
-          env.REGISTRY_CLIENT.putManifest(name, reference, s2, getManifestResponse.contentType),
+          env.REGISTRY_CLIENT.putManifest(name, reference, s2, {
+            contentType: getManifestResponse.contentType,
+            checkLayers: false,
+          }),
         );
         if (err) {
           console.error("Error uploading asynchronously the manifest ", reference, "into main registry");
@@ -243,7 +249,7 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
 
   const { name, reference } = req.params;
   const [res, err] = await wrap<PutManifestResponse | RegistryError, Error>(
-    env.REGISTRY_CLIENT.putManifest(name, reference, req.body!, req.headers.get("Content-Type")!),
+    env.REGISTRY_CLIENT.putManifest(name, reference, req.body!, { contentType: req.headers.get("Content-Type")! }),
   );
   if (err) {
     console.error("Error putting manifest:", errorString(err));
@@ -563,9 +569,7 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
       cursor: tags.cursor,
     });
     // Filter out sha256 manifest
-    manifestTags = manifestTags.concat(
-      tags.objects.filter((tag) => !tag.key.startsWith(`${name}/manifests/sha256:`)),
-    );
+    manifestTags = manifestTags.concat(tags.objects.filter((tag) => !tag.key.startsWith(`${name}/manifests/sha256:`)));
   }
 
   const keys = manifestTags.map((object) => object.key.split("/").pop()!);

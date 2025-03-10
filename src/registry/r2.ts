@@ -292,11 +292,23 @@ export class R2Registry implements Registry {
     namespace: string,
     reference: string,
     readableStream: ReadableStream<any>,
-    contentType: string,
+    {
+      contentType,
+      checkLayers,
+    }: {
+      contentType: string;
+      checkLayers?: boolean;
+    },
   ): Promise<PutManifestResponse | RegistryError> {
     const key = await this.gc.markForInsertion(namespace);
     try {
-      return this.putManifestInner(namespace, reference, readableStream, contentType);
+      return this.putManifestInner(
+        namespace,
+        reference,
+        readableStream,
+        contentType,
+        checkLayers !== undefined ? checkLayers === true : true,
+      );
     } finally {
       // if this fails, at some point it will be expired
       await this.gc.cleanInsertion(namespace, key);
@@ -308,6 +320,7 @@ export class R2Registry implements Registry {
     reference: string,
     readableStream: ReadableStream<any>,
     contentType: string,
+    checkLayers: boolean,
   ): Promise<PutManifestResponse | RegistryError> {
     const gcMarker = await this.gc.getGCMarker(name);
     const env = this.env;
@@ -322,8 +335,10 @@ export class R2Registry implements Registry {
     const text = await blob.text();
     const manifestJSON = JSON.parse(text);
     const manifest = manifestSchema.parse(manifestJSON);
-    const verifyManifestErr = await this.verifyManifest(name, manifest);
-    if (verifyManifestErr !== null) return { response: verifyManifestErr };
+    if (checkLayers) {
+      const verifyManifestErr = await this.verifyManifest(name, manifest);
+      if (verifyManifestErr !== null) return { response: verifyManifestErr };
+    }
 
     if (!(await this.gc.checkCanInsertData(name, gcMarker))) {
       console.error("Manifest can't be uploaded as there is/was a garbage collection going");
@@ -774,7 +789,7 @@ export class R2Registry implements Registry {
     if (hashedState === null || !hashedState.state) {
       return {
         response: new Response(null, { status: 404 }),
-      }
+      };
     }
     const state = hashedState.state;
 

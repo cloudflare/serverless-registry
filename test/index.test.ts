@@ -5,7 +5,7 @@ import { Env } from "..";
 import { RegistryTokens } from "../src/token";
 import { RegistryAuthProtocolTokenPayload } from "../src/auth";
 import { registries } from "../src/registry/registry";
-import { RegistryHTTPClient } from "../src/registry/http";
+import { isDockerDotIO, RegistryHTTPClient } from "../src/registry/http";
 import { encode } from "@cfworker/base64url";
 import { ManifestSchema } from "../src/manifest";
 import { limit } from "../src/chunk";
@@ -112,9 +112,11 @@ async function fetchUnauth(r: Request): Promise<Response> {
 }
 
 async function fetch(r: Request): Promise<Response> {
-  r.headers.append("Authorization", usernamePasswordToAuth("hello", "world"));
+  r.headers.append("Authorization", usernamePasswordToAuth(username, "world"));
   return await fetchUnauth(r);
 }
+
+const username = "hello";
 
 describe("v2", () => {
   test("/v2", async () => {
@@ -497,15 +499,13 @@ test("registries configuration", async () => {
     {
       configuration: "[{}]",
       expected: [],
-      error:
-        "Error parsing registries JSON: zod error: - invalid_type: Required: 0,registry\n\t- invalid_type: Required: 0,password_env\n\t- invalid_type: Required: 0,username",
+      error: "Error parsing registries JSON: zod error: - invalid_type: Required: 0,registry",
       partialError: false,
     },
     {
       configuration: `[{ "registry": "no-url/hello-world" }]`,
       expected: [],
-      error:
-        "Error parsing registries JSON: zod error: - invalid_string: Invalid url: 0,registry\n\t- invalid_type: Required: 0,password_env\n\t- invalid_type: Required: 0,username",
+      error: "Error parsing registries JSON: zod error: - invalid_string: Invalid url: 0,registry",
       partialError: false,
     },
     {
@@ -550,6 +550,18 @@ test("registries configuration", async () => {
           registry: "https://hello2.com/domain",
           username: "hello world 2",
           password_env: "PASSWORD_ENV 2",
+        },
+      ],
+      partialError: false,
+      error: "",
+    },
+    {
+      configuration: `[{
+        "registry": "https://hello.com/domain"
+      }]`,
+      expected: [
+        {
+          registry: "https://hello.com/domain",
         },
       ],
       partialError: false,
@@ -601,7 +613,7 @@ describe("http client", () => {
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
-      username: "hello",
+      username,
     });
     const res = await client.manifestExists("namespace/hello", "latest");
     if ("response" in res) {
@@ -625,7 +637,7 @@ describe("http client", () => {
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
-      username: "hello",
+      username,
     });
     const res = await client.manifestExists("namespace/hello", "latest");
     if ("response" in res) {
@@ -654,11 +666,7 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).toEqual([
-      "hello",
-      "hello-2",
-      "latest",
-    ]);
+    expect(tags.tags).toEqual(["hello", "hello-2", "latest"]);
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -711,11 +719,7 @@ describe("push and catalog", () => {
     const tagsRes = await fetch(createRequest("GET", `/v2/hello-world-main/tags/list?n=1000`, null));
     const tags = (await tagsRes.json()) as TagsList;
     expect(tags.name).toEqual("hello-world-main");
-    expect(tags.tags).toEqual([
-      "hello",
-      "hello-2",
-      "latest",
-    ]);
+    expect(tags.tags).toEqual(["hello", "hello-2", "latest"]);
 
     const repositoryBuildUp: string[] = [];
     let currentPath = "/v2/_catalog?n=1";
@@ -1110,4 +1114,23 @@ describe("garbage collector", () => {
       expect(listBlobs.objects.length).toEqual(0);
     }
   });
+});
+
+test("docker.io", () => {
+  const t = [
+    ["https://docker.io", true],
+    ["https://d.docker.io", true],
+    ["https://d.dockerr.io", false],
+    ["https://dddocker.io", false],
+    ["https://docker.ioo", false],
+    ["https://d.docker.com", false],
+    ["https://docker.com", false],
+    ["http://docker.io", false],
+  ] as const;
+  for (const testCase of t) {
+    const isDocker = isDockerDotIO(new URL(testCase[0]));
+    if (isDocker !== testCase[1]) {
+      throw new Error(`Expected ${testCase[1]} on ${testCase[0]} but got ${isDocker}`);
+    }
+  }
 });
