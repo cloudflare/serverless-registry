@@ -42,7 +42,8 @@ v2Router.get("/_catalog", async (req, env: Env) => {
     }),
     {
       headers: {
-        Link: `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
+        "Link": `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
+        "Content-Type": "application/json",
       },
     },
   );
@@ -72,7 +73,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   const tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
     limit: isNaN(limitInt) ? 1000 : limitInt,
-    startAfter: last?.toString(),
+    cursor: last?.toString(),
   });
   for (const tag of tags.objects) {
     if (!tag.checksums.sha256) {
@@ -330,6 +331,25 @@ v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
 // this is the first thing that the client asks for in an upload
 v2Router.post("/:name+/blobs/uploads/", async (req, env: Env) => {
   const { name } = req.params;
+  const { from, mount } = req.query;
+  if (mount !== undefined && from !== undefined) {
+    // Try to create a new upload from an existing layer on another repository
+    const [finishedUploadObject, err] = await wrap<FinishedUploadObject | RegistryError, Error>(
+      env.REGISTRY_CLIENT.mountExistingLayer(from.toString(), mount.toString(), name),
+    );
+    // If there is an error, fallback to the default layer upload system
+    if (!(err || (finishedUploadObject && "response" in finishedUploadObject))) {
+      return new Response(null, {
+        status: 201,
+        headers: {
+          "Content-Length": "0",
+          "Location": finishedUploadObject.location,
+          "Docker-Content-Digest": finishedUploadObject.digest,
+        },
+      });
+    }
+  }
+  // Upload a new layer
   const [uploadObject, err] = await wrap<UploadObject | RegistryError, Error>(env.REGISTRY_CLIENT.startUpload(name));
 
   if (err) {
@@ -532,20 +552,41 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
 
   const { n: nStr = 50, last } = req.query;
   const n = +nStr;
-  if (isNaN(n)) {
+  if (isNaN(n) || n <= 0) {
     throw new ServerError("invalid 'n' parameter", 400);
   }
 
-  const tags = await env.REGISTRY.list({
+  let tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
     limit: n,
     startAfter: last ? `${name}/manifests/${last}` : undefined,
   });
+  // Filter out sha256 manifest
+  let manifestTags = tags.objects.filter((tag) => !tag.key.startsWith(`${name}/manifests/sha256:`));
+  // If results are truncated and the manifest filter removed some result, extend the search to reach the n number of results expected by the client
+  while (tags.objects.length > 0 && tags.truncated && manifestTags.length !== n) {
+    tags = await env.REGISTRY.list({
+      prefix: `${name}/manifests`,
+      limit: n - manifestTags.length,
+      cursor: tags.cursor,
+    });
+    // Filter out sha256 manifest
+    manifestTags = manifestTags.concat(
+      tags.objects.filter((tag) => !tag.key.startsWith(`${name}/manifests/sha256:`)),
+    );
+  }
 
-  const keys = tags.objects.map((object) => object.key.split("/").pop()!);
+  const keys = manifestTags.map((object) => object.key.split("/").pop()!);
   const url = new URL(req.url);
   url.searchParams.set("n", `${n}`);
   url.searchParams.set("last", keys.length ? keys[keys.length - 1] : "");
+  const responseHeaders: { "Content-Type": string; "Link"?: string } = {
+    "Content-Type": "application/json",
+  };
+  // Only supply a next link if the previous result is truncated
+  if (tags.truncated) {
+    responseHeaders.Link = `${url.toString()}; rel=next`;
+  }
   return new Response(
     JSON.stringify({
       name,
@@ -553,10 +594,7 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
     }),
     {
       status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Link": `${url.toString()}; rel=next`,
-      },
+      headers: responseHeaders,
     },
   );
 });
