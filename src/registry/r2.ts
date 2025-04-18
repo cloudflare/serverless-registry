@@ -513,7 +513,7 @@ export class R2Registry implements Registry {
     // Generate a unique ID for this upload
     const uuid = crypto.randomUUID();
 
-    const upload = await this.env.REGISTRY.createMultipartUpload(uuid, {
+    const upload = await this.env.REGISTRY.createMultipartUpload("uploads/"+uuid, {
       customMetadata: { [registryUploadKey]: "true" },
     });
     const state = {
@@ -596,7 +596,7 @@ export class R2Registry implements Registry {
       return { response: new InternalError() };
     }
 
-    const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
+    const upload = this.env.REGISTRY.resumeMultipartUpload("uploads/"+state.registryUploadId, state.uploadId);
     const uuid = state.registryUploadId;
     const env = this.env;
 
@@ -819,10 +819,11 @@ export class R2Registry implements Registry {
         sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
       });
     } else {
-      const upload = this.env.REGISTRY.resumeMultipartUpload(uuid, state.uploadId);
+      const upload_path = "uploads/"+uuid;
+      const upload = this.env.REGISTRY.resumeMultipartUpload(upload_path, state.uploadId);
       // TODO: Handle one last buffer here
       await upload.complete(state.parts);
-      const obj = await this.env.REGISTRY.get(uuid);
+      const obj = await this.env.REGISTRY.get(upload_path);
       if (obj === null) {
         console.error("unreachable, obj is null when we just created upload");
         return {
@@ -853,16 +854,16 @@ export class R2Registry implements Registry {
         }
 
         const [, err] = await wrap(
-          this.env.REGISTRY.put(target, uuid, {
+          this.env.REGISTRY.put(target, upload_path, {
             customMetadata: {
-              [referenceHeader]: uuid,
+              [referenceHeader]: upload_path,
               [digestHeaderInReference]: digest,
             },
           }),
         );
         if (err !== null) {
           console.error("error uploading reference blob", errorString(err));
-          await this.env.REGISTRY.delete(uuid);
+          await this.env.REGISTRY.delete(upload_path);
           return {
             response: new InternalError(),
           };
@@ -872,7 +873,7 @@ export class R2Registry implements Registry {
           sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
         });
         const [, err] = await wrap(put);
-        await this.env.REGISTRY.delete(uuid);
+        await this.env.REGISTRY.delete(upload_path);
         if (err !== null) {
           console.error("error uploading blob", errorString(err));
           return {
@@ -900,7 +901,7 @@ export class R2Registry implements Registry {
     }
     const state = hashedState.state;
 
-    const upload = this.env.REGISTRY.resumeMultipartUpload(state.registryUploadId, state.uploadId);
+    const upload = this.env.REGISTRY.resumeMultipartUpload("uploads/"+state.registryUploadId, state.uploadId);
     await upload.abort();
     return true;
   }
