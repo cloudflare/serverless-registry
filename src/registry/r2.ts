@@ -247,7 +247,7 @@ export class R2Registry implements Registry {
       // <path>/<'blobs' | 'manifests'>/<name>
       const parts = object.key.split("/");
       // maybe an upload.
-      if (parts.length === 1) {
+      if (parts.length === 1 || parts[0] === "_uploads") {
         return;
       }
 
@@ -513,7 +513,7 @@ export class R2Registry implements Registry {
     // Generate a unique ID for this upload
     const uuid = crypto.randomUUID();
 
-    const upload = await this.env.REGISTRY.createMultipartUpload("uploads/"+uuid, {
+    const upload = await this.env.REGISTRY.createMultipartUpload("_uploads/"+uuid, {
       customMetadata: { [registryUploadKey]: "true" },
     });
     const state = {
@@ -596,7 +596,7 @@ export class R2Registry implements Registry {
       return { response: new InternalError() };
     }
 
-    const upload = this.env.REGISTRY.resumeMultipartUpload("uploads/"+state.registryUploadId, state.uploadId);
+    const upload = this.env.REGISTRY.resumeMultipartUpload("_uploads/"+state.registryUploadId, state.uploadId);
     const uuid = state.registryUploadId;
     const env = this.env;
 
@@ -819,7 +819,7 @@ export class R2Registry implements Registry {
         sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
       });
     } else {
-      const upload_path = "uploads/"+uuid;
+      const upload_path = "_uploads/"+uuid;
       const upload = this.env.REGISTRY.resumeMultipartUpload(upload_path, state.uploadId);
       // TODO: Handle one last buffer here
       await upload.complete(state.parts);
@@ -901,7 +901,7 @@ export class R2Registry implements Registry {
     }
     const state = hashedState.state;
 
-    const upload = this.env.REGISTRY.resumeMultipartUpload("uploads/"+state.registryUploadId, state.uploadId);
+    const upload = this.env.REGISTRY.resumeMultipartUpload("_uploads/"+state.registryUploadId, state.uploadId);
     await upload.abort();
     return true;
   }
