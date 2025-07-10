@@ -131,14 +131,18 @@ for (const layer of manifest.Layers) {
       }
 
       const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
-      await rm(inprogressPath, { recursive: true });
+      try {
+        await rm(inprogressPath, { recursive: true });
+      } catch (error) {
+        // File doesn't exist, which is fine
+      }
 
       const hasher = new Bun.CryptoHasher("sha256");
       const cacheWriter = file(inprogressPath).writer();
       const gzipStream = zlib.createGzip({ level: 9 });
       const writeStream = new stream.Writable({
         write(val: Buffer, _, cb) {
-          hasher.update(val, "binary");
+          hasher.update(new Uint8Array(val));
           cacheWriter.write(val);
           cb();
         },
