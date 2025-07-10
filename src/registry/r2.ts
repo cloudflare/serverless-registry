@@ -450,6 +450,17 @@ export class R2Registry implements Registry {
       };
     }
 
+    // Follow symlink if present
+    if (res.customMetadata && symlinkHeader in res.customMetadata) {
+      const layerPath = res.customMetadata[symlinkHeader];
+      const [linkName, linkDigest] = layerPath.split("/blobs/");
+      if (linkName == name && linkDigest == tag) {
+        return { exists: false };
+      }
+      // Recursively check the real layer
+      return await this.layerExists(linkName, linkDigest);
+    }
+
     return {
       digest: hexToDigest(res.checksums.sha256!),
       size: res.size,

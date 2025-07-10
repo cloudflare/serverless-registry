@@ -501,9 +501,12 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
 v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
   const { name, tag } = req.params;
 
-  const res = await env.REGISTRY.head(`${name}/blobs/${tag}`);
-  let layerExistsResponse: CheckLayerResponse | null = null;
-  if (!res) {
+  const layerExistsResponse = await env.REGISTRY_CLIENT.layerExists(name, tag);
+  if ("response" in layerExistsResponse) {
+    return layerExistsResponse.response;
+  }
+
+  if (!layerExistsResponse.exists) {
     const registryList = registries(env);
     for (const registry of registryList) {
       const client = new RegistryHTTPClient(env, registry);
@@ -513,26 +516,21 @@ v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
       }
 
       if (response.exists) {
-        layerExistsResponse = response;
-        break;
+        return new Response(null, {
+          status: 200,
+          headers: {
+            "Content-Length": response.size.toString(),
+            "Docker-Content-Digest": response.digest,
+          },
+        });
       }
     }
 
-    if (layerExistsResponse === null || !layerExistsResponse.exists)
-      return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
-  } else {
-    if (res.checksums.sha256 === null) {
-      throw new ServerError("invalid checksum from R2 backend");
-    }
-
-    layerExistsResponse = {
-      digest: hexToDigest(res.checksums.sha256!),
-      size: res.size,
-      exists: true,
-    };
+    return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
   }
 
   return new Response(null, {
+    status: 200,
     headers: {
       "Content-Length": layerExistsResponse.size.toString(),
       "Docker-Content-Digest": layerExistsResponse.digest,
