@@ -5,23 +5,21 @@ import z from "zod";
 import { GarbageCollectionMode } from "./garbage-collector";
 
 // Defines a registry and how it's configured
-const registryConfiguration = z
-  .object({
+const registryConfiguration = z.union([
+  z.object({
     registry: z.string().url(),
-  })
-  .and(
-    z
-      .object({
-        password_env: z.string(),
-        username: z.string(),
-      })
-      .or(
-        z.object({
-          username: z.undefined(),
-          password: z.undefined(),
-        }),
-      ),
-  );
+    password_env: z.string(),
+    username: z.string(),
+  }),
+  z.object({
+    registry: z.string().url(),
+    accessKeyId_env: z.string(),
+    secretAccessKey_env: z.string(),
+  }),
+  z.object({
+    registry: z.string().url(),
+  }),
+]);
 export type RegistryConfiguration = z.infer<typeof registryConfiguration>;
 
 export function registries(env: Env): RegistryConfiguration[] {

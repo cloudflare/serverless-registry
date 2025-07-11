@@ -105,6 +105,17 @@ cat ./registry-service-credentials.json | base64 | npx wrangler secret put REGIS
 echo $GITHUB_TOKEN | npx wrangler secret put REGISTRY_TOKEN --env production
 ```
 
+[AWS ECR](https://aws.amazon.com/ecr/):
+
+It is recommended to create an IAM user with the `AmazonEC2ContainerRegistryReadOnly` permission to serve as a service account. Create and use the security credentials for this user as follows:
+
+```
+[env.production.vars]
+REGISTRIES_JSON = "[{ \"registry\": \"https://<account-id>.dkr.ecr.<region>.amazonaws.com\", \"accessKeyId_env\": \"AWS_ACCESS_KEY_ID\", \"secretAccessKey_env\": \"AWS_SECRET_ACCESS_KEY\" }]"
+```
+
+Then setup the secrets with `npx wrangler secret put AWS_ACCESS_KEY_ID --env production` and `npx wrangler secret put AWS_SECRET_ACCESS_KEY --env production`.
+
 The trick is always looking for how you would login in Docker for
 the target registry and setup the credentials.
 
@@ -134,3 +145,5 @@ The project is licensed under the [Apache License](https://opensource.org/licens
 ### Contribution
 
 See `CONTRIBUTING.md` for contributing to the project.
+
+

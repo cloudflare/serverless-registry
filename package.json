@@ -10,6 +10,7 @@
     "test": "vitest --config test/vitest.config.ts run"
   },
   "dependencies": {
+    "@aws-sdk/client-ecr": "^3.844.0",
     "@cfworker/base64url": "^1.12.5",
     "@tsndr/cloudflare-worker-jwt": "^2.5.1",
     "itty-router": "^4.0.27",
