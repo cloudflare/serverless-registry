@@ -34,17 +34,23 @@ v2Router.get("/_catalog", async (req, env: Env) => {
   if ("response" in response) {
     return response.response;
   }
-
   const url = new URL(req.url);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (response.cursor) {
+    const cleanCursor = response.cursor.split("/manifests/")[0];
+    const linkValue = `<${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${cleanCursor}>; rel="next"`;
+    headers["Link"] = linkValue;
+  }
+
   return new Response(
     JSON.stringify({
       repositories: response.repositories,
     }),
     {
-      headers: {
-        "Link": `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
-        "Content-Type": "application/json",
-      },
+      headers,
     },
   );
 });
