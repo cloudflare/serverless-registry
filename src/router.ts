@@ -34,23 +34,17 @@ v2Router.get("/_catalog", async (req, env: Env) => {
   if ("response" in response) {
     return response.response;
   }
+
   const url = new URL(req.url);
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (response.cursor) {
-    const cleanCursor = response.cursor.split("/manifests/")[0];
-    const linkValue = `<${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${cleanCursor}>; rel="next"`;
-    headers["Link"] = linkValue;
-  }
-
   return new Response(
     JSON.stringify({
       repositories: response.repositories,
     }),
     {
-      headers,
+      headers: {
+        "Link": `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
+        "Content-Type": "application/json",
+      },
     },
   );
 });
@@ -93,22 +87,23 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
 
   const url = new URL(req.url);
   if (tags.truncated) {
-    url.searchParams.set("last", tags.truncated ? tags.cursor : "");
+    url.searchParams.set("last", tags.cursor);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const linkValue = `<${url.toString()}>; rel="next"`;
+    headers["Link"] = linkValue;
     return new Response(JSON.stringify(ManifestTagsListTooBigError), {
       status: 400,
-      headers: {
-        "Link": `${url.toString()}; rel=next`,
-        "Content-Type": "application/json",
-      },
+      headers,
     });
   }
-
   // Last but not least, delete the digest manifest
   await env.REGISTRY.delete(`${name}/manifests/${reference}`);
   return new Response("", {
     status: 202,
     headers: {
-      "Content-Length": "None",
+      "Content-Length": "0",
     },
   });
 });
@@ -582,12 +577,13 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
   const url = new URL(req.url);
   url.searchParams.set("n", `${n}`);
   url.searchParams.set("last", keys.length ? keys[keys.length - 1] : "");
-  const responseHeaders: { "Content-Type": string; "Link"?: string } = {
+  const responseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
   };
   // Only supply a next link if the previous result is truncated
   if (tags.truncated) {
-    responseHeaders.Link = `${url.toString()}; rel=next`;
+    const linkValue = `<${url.toString()}>; rel="next"`;
+    responseHeaders["Link"] = linkValue;
   }
   return new Response(
     JSON.stringify({
