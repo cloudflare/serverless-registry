@@ -474,6 +474,17 @@ describe("v2 manifests", () => {
         expect(layerC.ok).toBeTruthy();
         expect(await layerB.bytes()).toEqual(sourceData);
         expect(await layerC.bytes()).toEqual(sourceData);
+
+        // Check layer HEAD returns source metadata for mounted symlinks.
+        const layerHeadB = await fetch(createRequest("HEAD", `/v2/${repoB}/blobs/${layer}`, null));
+        expect(layerHeadB.ok).toBeTruthy();
+        expect(layerHeadB.headers.get("Docker-Content-Digest")).toEqual(layer);
+        expect(+(layerHeadB.headers.get("Content-Length") ?? "-1")).toEqual(sourceData.byteLength);
+
+        const layerHeadC = await fetch(createRequest("HEAD", `/v2/${repoC}/blobs/${layer}`, null));
+        expect(layerHeadC.ok).toBeTruthy();
+        expect(layerHeadC.headers.get("Docker-Content-Digest")).toEqual(layer);
+        expect(+(layerHeadC.headers.get("Content-Length") ?? "-1")).toEqual(sourceData.byteLength);
       }
     }
   });
