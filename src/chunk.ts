@@ -43,26 +43,34 @@ export async function getChunkBlob(env: Env, chunk: Chunk): Promise<Blob | null>
  */
 export function limit(streamInput: ReadableStream, limitBytes: number): ReadableStream {
   if (streamInput instanceof FixedLengthStream) return streamInput;
-  const stream = new FixedLengthStream(limitBytes, {});
+
+  // Use standard TransformStream to limit length, ensuring backpressure is correctly handled
+  const { readable, writable } = new TransformStream();
 
   (async () => {
-    const w = stream.writable.getWriter();
-    const r = streamInput.getReader();
+    const reader = streamInput.getReader();
+    const writer = writable.getWriter();
     let written = 0;
-    while (true) {
-      const { done, value } = await r.read();
-      if (done) break;
-      await w.write(value);
-      written += value.length;
-      if (written >= limitBytes) break;
+    try {
+      while (written < limitBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const toWrite = value.length + written > limitBytes
+          ? value.slice(0, limitBytes - written)
+          : value;
+        await writer.write(toWrite);
+        written += toWrite.length;
+        if (written >= limitBytes) break;
+      }
+    } catch (e) {
+      writer.abort(e);
+    } finally {
+      reader.releaseLock();
+      try { writer.close(); } catch {}
     }
-
-    r.releaseLock();
-    w.releaseLock();
-    await stream.writable.close();
   })();
 
-  return stream.readable;
+  return readable;
 }
 
 export async function* split(

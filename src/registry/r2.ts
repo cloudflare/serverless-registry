@@ -665,8 +665,10 @@ export class R2Registry implements Registry {
             httpMetadata: new Headers(headers),
             customMetadata: headers,
           });
-          state.parts.push(await partTask);
-          await r2RegistryObjectTask;
+
+          // Run both in parallel and wait for both to complete
+          const [part] = await Promise.all([partTask, r2RegistryObjectTask]);
+          state.parts.push(part);
           return;
         }
 
@@ -694,7 +696,7 @@ export class R2Registry implements Registry {
     };
 
     if (length === undefined) {
-      console.error("Length needs to be defined");
+      console.error("Length needs to be defined for streaming upload to R2. Ensure Content-Length or Content-Range is provided.");
       return {
         response: new InternalError(),
       };
