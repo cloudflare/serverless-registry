@@ -10,7 +10,7 @@ import {
   split,
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
-import { SHA256_PREFIX_LEN, getSHA256, hexToDigest } from "../user";
+import { SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
 import { readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
@@ -19,8 +19,10 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  ListReferrersResponse,
   ListRepositoriesResponse,
   PutManifestResponse,
+  ReferrerDescriptor,
   Registry,
   RegistryError,
   UploadId,
@@ -29,6 +31,100 @@ import {
 } from "./registry";
 import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
+
+export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
+
+function referrersPrefix(name: string, digest: string): string {
+  return `${name}/_referrers/${digest}/`;
+}
+
+function referrersPath(name: string, subjectDigest: string, digest: string): string {
+  return `${referrersPrefix(name, subjectDigest)}${digest}`;
+}
+
+function artifactTypeFromManifest(manifest: ManifestSchema): string | undefined {
+  if (manifest.schemaVersion !== 2) {
+    return undefined;
+  }
+
+  if (manifest.artifactType && manifest.artifactType.length > 0) {
+    return manifest.artifactType;
+  }
+
+  if ("manifests" in manifest) {
+    return undefined;
+  }
+
+  return manifest.config.mediaType.length > 0 ? manifest.config.mediaType : undefined;
+}
+
+function descriptorFromManifest(manifest: ManifestSchema, digest: string, size: number): ReferrerDescriptor | null {
+  if (manifest.schemaVersion !== 2 || manifest.subject === undefined) {
+    return null;
+  }
+
+  const descriptor: ReferrerDescriptor = {
+    mediaType: manifest.mediaType,
+    digest,
+    size,
+  };
+
+  const artifactType = artifactTypeFromManifest(manifest);
+  if (artifactType !== undefined) {
+    descriptor.artifactType = artifactType;
+  }
+
+  if (manifest.annotations !== undefined) {
+    descriptor.annotations = manifest.annotations;
+  }
+
+  return descriptor;
+}
+
+function parseStoredReferrerDescriptor(descriptor: unknown, expectedDigest: string): ReferrerDescriptor | null {
+  if (typeof descriptor !== "object" || descriptor === null) {
+    return null;
+  }
+
+  const candidate = descriptor as Record<string, unknown>;
+  if (
+    typeof candidate.mediaType !== "string" ||
+    typeof candidate.digest !== "string" ||
+    candidate.digest !== expectedDigest ||
+    typeof candidate.size !== "number" ||
+    !Number.isInteger(candidate.size) ||
+    candidate.size < 0
+  ) {
+    return null;
+  }
+
+  const parsedDescriptor: ReferrerDescriptor = {
+    mediaType: candidate.mediaType,
+    digest: candidate.digest,
+    size: candidate.size,
+  };
+
+  if (candidate.artifactType !== undefined) {
+    if (typeof candidate.artifactType !== "string") {
+      return null;
+    }
+    parsedDescriptor.artifactType = candidate.artifactType;
+  }
+
+  if (candidate.annotations !== undefined) {
+    if (typeof candidate.annotations !== "object" || candidate.annotations === null) {
+      return null;
+    }
+
+    const annotations = Object.entries(candidate.annotations);
+    if (!annotations.every((entry): entry is [string, string] => typeof entry[1] === "string")) {
+      return null;
+    }
+    parsedDescriptor.annotations = Object.fromEntries(annotations);
+  }
+
+  return parsedDescriptor;
+}
 
 export type Chunk =
   | {
@@ -162,9 +258,9 @@ export class R2Registry implements Registry {
 
   async listRepositories(limit?: number, last?: string): Promise<RegistryError | ListRepositoriesResponse> {
     // The idea in listRepositories is list all entries in the R2 bucket and map them to repositories.
-    // We do this by taking advantage of the name format in the R2 bucket:
-    // name format is:
-    //   <path>/<'blobs' | 'manifests'>/<name>
+    // The bucket also contains internal keys like _referrers/, but repository discovery only derives
+    // repositories from manifest paths with the following shape:
+    //   <path>/manifests/<name>
     // This means we slice the last two items in the key and add them to our hash map.
     // At the end, we start skipping entries until we find another unique key, then we return that entry as startAfter.
 
@@ -196,8 +292,10 @@ export class R2Registry implements Registry {
       // name format is:
       // <path>/<'blobs' | 'manifests'>/<name>
       const parts = object.key.split("/");
+      if (parts[parts.length - 2] !== "manifests") {
+        return;
+      }
       const repository = parts.slice(0, parts.length - 2).join("/");
-      if (parts[parts.length - 2] === "blobs") return;
 
       if (repository in repositories) return;
       totalRecords++;
@@ -288,6 +386,85 @@ export class R2Registry implements Registry {
     return null;
   }
 
+  async listReferrers(
+    name: string,
+    digest: string,
+    options?: {
+      artifactType?: string;
+      limit?: number;
+      last?: string;
+    },
+  ): Promise<ListReferrersResponse | RegistryError> {
+    if (options?.last !== undefined && !isValidDigest(options.last)) {
+      return {
+        response: new ServerError("invalid referrers cursor", 400),
+      };
+    }
+
+    const limit = Math.min(Math.max(Math.trunc(options?.limit ?? 100), 1), 1000);
+    const prefix = referrersPrefix(name, digest);
+    const manifests: ReferrerDescriptor[] = [];
+    const pageSize = Math.min(Math.max(limit + 1, 100), 1000);
+
+    let objects = await this.env.REGISTRY.list({
+      prefix,
+      limit: pageSize,
+      startAfter: options?.last ? referrersPath(name, digest, options.last) : undefined,
+    });
+
+    while (true) {
+      for (const object of objects.objects) {
+        const descriptorObject = await this.env.REGISTRY.get(object.key);
+        if (descriptorObject === null) {
+          continue;
+        }
+
+        const expectedDigest = object.key.split("/").pop();
+        if (expectedDigest === undefined) {
+          continue;
+        }
+
+        let descriptorJSON: unknown;
+        try {
+          descriptorJSON = await descriptorObject.json();
+        } catch {
+          continue;
+        }
+
+        const descriptor = parseStoredReferrerDescriptor(descriptorJSON, expectedDigest);
+        if (descriptor === null) {
+          continue;
+        }
+
+        if (options?.artifactType !== undefined && descriptor.artifactType !== options.artifactType) {
+          continue;
+        }
+
+        manifests.push(descriptor);
+        if (manifests.length > limit) {
+          return {
+            manifests: manifests.slice(0, limit),
+            cursor: manifests[limit - 1].digest,
+          };
+        }
+      }
+
+      if (!objects.truncated) {
+        break;
+      }
+
+      objects = await this.env.REGISTRY.list({
+        prefix,
+        limit: pageSize,
+        cursor: objects.cursor,
+      });
+    }
+
+    return {
+      manifests,
+    };
+  }
+
   async putManifest(
     namespace: string,
     reference: string,
@@ -333,8 +510,44 @@ export class R2Registry implements Registry {
     const digest = await sha256.digest;
     const digestStr = hexToDigest(digest);
     const text = await blob.text();
-    const manifestJSON = JSON.parse(text);
-    const manifest = manifestSchema.parse(manifestJSON);
+    let manifestJSON: unknown;
+    try {
+      manifestJSON = JSON.parse(text);
+    } catch {
+      return {
+        response: new ManifestError("MANIFEST_INVALID", "invalid manifest JSON"),
+      };
+    }
+
+    const manifestResult = manifestSchema.safeParse(manifestJSON);
+    if (!manifestResult.success) {
+      const firstIssue = manifestResult.error.issues[0];
+      const path = firstIssue?.path.length ? `${firstIssue.path.join(".")}: ` : "";
+      return {
+        response: new ManifestError("MANIFEST_INVALID", `${path}${firstIssue?.message ?? "invalid manifest"}`),
+      };
+    }
+
+    const manifest = manifestResult.data;
+    const subjectDigest = manifest.schemaVersion === 2 ? manifest.subject?.digest : undefined;
+    if (subjectDigest !== undefined && !isValidDigest(subjectDigest)) {
+      return {
+        response: new ManifestError("MANIFEST_INVALID", `invalid subject digest ${subjectDigest}`),
+      };
+    }
+    if (subjectDigest !== undefined) {
+      const [subjectManifest, subjectManifestErr] = await wrap(env.REGISTRY.head(`${name}/manifests/${subjectDigest}`));
+      if (subjectManifestErr) {
+        return wrapError("putManifestInner", subjectManifestErr);
+      }
+      if (subjectManifest === null) {
+        return {
+          response: new ManifestError("BLOB_UNKNOWN", `unknown subject ${subjectDigest}`),
+        };
+      }
+    }
+
+    const referrerDescriptor = descriptorFromManifest(manifest, digestStr, blob.size);
     if (checkLayers) {
       const verifyManifestErr = await this.verifyManifest(name, manifest);
       if (verifyManifestErr !== null) return { response: verifyManifestErr };
@@ -345,6 +558,11 @@ export class R2Registry implements Registry {
       return { response: new ServerError("garbage collection is on-going... check with registry administrator", 500) };
     }
 
+    const customMetadata = {
+      hasSubject: subjectDigest !== undefined ? "true" : "false",
+      ...(subjectDigest !== undefined ? { subjectDigest } : {}),
+    };
+
     const putReference = async () => {
       // if the reference is the same as a digest, it's not necessary to insert
       if (reference === digestStr) return;
@@ -353,10 +571,11 @@ export class R2Registry implements Registry {
         httpMetadata: {
           contentType,
         },
+        customMetadata,
       });
     };
 
-    await Promise.all([
+    const putTasks: Promise<unknown>[] = [
       putReference(),
       // this is the "main" manifest
       env.REGISTRY.put(`${name}/manifests/${digestStr}`, text, {
@@ -364,11 +583,25 @@ export class R2Registry implements Registry {
         httpMetadata: {
           contentType,
         },
+        customMetadata,
       }),
-    ]);
+    ];
+
+    if (referrerDescriptor !== null && subjectDigest !== undefined) {
+      putTasks.push(
+        env.REGISTRY.put(referrersPath(name, subjectDigest, digestStr), JSON.stringify(referrerDescriptor), {
+          httpMetadata: {
+            contentType: "application/json",
+          },
+        }),
+      );
+    }
+
+    await Promise.all(putTasks);
     return {
       digest: hexToDigest(digest),
       location: `/v2/${name}/manifests/${reference}`,
+      subject: subjectDigest,
     };
   }
 

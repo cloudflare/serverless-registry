@@ -6,10 +6,36 @@ import type { RegistryTokenCapability } from "./auth";
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
 
+const digestPattern = /^([a-z0-9]+(?:[+._-][a-z0-9]+)*):([A-Za-z0-9=_-]+)$/;
+const algorithmSpecificDigestPatterns: Record<string, RegExp> = {
+  blake3: /^[a-f0-9]{64}$/,
+  sha256: /^[a-f0-9]{64}$/,
+  sha512: /^[a-f0-9]{128}$/,
+};
+
 export function hexToDigest(sha256: ArrayBuffer, prefix: string = SHA256_PREFIX + ":") {
   const digest = [...new Uint8Array(sha256)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
   return `${prefix}${digest}`;
+}
+
+export function isValidDigest(digest: string): boolean {
+  if (digest.length === 0) {
+    return false;
+  }
+
+  const match = digestPattern.exec(digest);
+  if (match === null) {
+    return false;
+  }
+
+  const [, algorithm, encoded] = match;
+  const algorithmSpecificPattern = algorithmSpecificDigestPatterns[algorithm];
+  if (algorithmSpecificPattern !== undefined) {
+    return algorithmSpecificPattern.test(encoded);
+  }
+
+  return true;
 }
 
 function stringToArrayBuffer(s: string): ArrayBuffer {

@@ -1,5 +1,5 @@
 import { Env } from "../..";
-import { InternalError } from "../errors";
+import { InternalError, ServerError } from "../errors";
 import { errorString } from "../utils";
 import { GarbageCollectionMode } from "./garbage-collector";
 import {
@@ -8,14 +8,17 @@ import {
   FinishedUploadObject,
   GetLayerResponse,
   GetManifestResponse,
+  ListReferrersResponse,
   ListRepositoriesResponse,
   PutManifestResponse,
+  ReferrerDescriptor,
   Registry,
   RegistryConfiguration,
   RegistryError,
   UploadId,
   UploadObject,
 } from "./registry";
+import { ociImageIndexContentType } from "./r2";
 
 type AuthContext = {
   authType: AuthType;
@@ -51,6 +54,92 @@ export const manifestTypes = [
 ] as const;
 
 export type ManifestType = (typeof manifestTypes)[number];
+
+function splitLinkHeaderValues(link: string): string[] {
+  const values: string[] = [];
+  let current = "";
+  let insideAngleBrackets = false;
+  let insideQuotes = false;
+
+  for (const character of link) {
+    if (character === '"' && !insideAngleBrackets) {
+      insideQuotes = !insideQuotes;
+    } else if (character === "<" && !insideQuotes) {
+      insideAngleBrackets = true;
+    } else if (character === ">" && !insideQuotes) {
+      insideAngleBrackets = false;
+    } else if (character === "," && !insideAngleBrackets && !insideQuotes) {
+      values.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (current.length > 0) {
+    values.push(current.trim());
+  }
+
+  return values;
+}
+
+function parseLinkHeaderURL(link: string, baseURL: string): URL | null {
+  for (const linkValue of splitLinkHeaderValues(link)) {
+    const targetStart = linkValue.indexOf("<");
+    const targetEnd = linkValue.indexOf(">", targetStart + 1);
+    if (targetStart === -1 || targetEnd === -1) {
+      continue;
+    }
+
+    const params = linkValue
+      .slice(targetEnd + 1)
+      .split(";")
+      .map((param) => param.trim())
+      .filter((param) => param.length > 0);
+    const isNext = params.some((param) => {
+      const [name, ...valueParts] = param.split("=");
+      if (name.toLowerCase() !== "rel" || valueParts.length === 0) {
+        return false;
+      }
+
+      const value = valueParts.join("=").trim().replace(/^"|"$/g, "");
+      return value.split(/\s+/).includes("next");
+    });
+    if (!isNext) {
+      continue;
+    }
+
+    const href = linkValue.slice(targetStart + 1, targetEnd).trim();
+    try {
+      return new URL(href);
+    } catch {
+      if (baseURL.length === 0) {
+        return null;
+      }
+
+      try {
+        return new URL(href, baseURL);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isOpaqueReferrersCursor(cursor: string): boolean {
+  return cursor.startsWith("/v2/");
+}
+
+function normalizeReferrersCursor(nextURL: URL, requestURL: URL): string | undefined {
+  if (nextURL.origin !== requestURL.origin || nextURL.pathname !== requestURL.pathname) {
+    return undefined;
+  }
+
+  return `${nextURL.pathname}${nextURL.search}`;
+}
 
 function ctxIntoHeaders(ctx: HTTPContext): Headers {
   const headers = new Headers();
@@ -225,7 +314,7 @@ export class RegistryHTTPClient implements Registry {
     return false;
   }
 
-  async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams): Promise<Response> {
+  async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams) {
     params.delete("password");
     console.log("sending authentication parameters:", ctx.realm + "?" + params.toString());
 
@@ -467,6 +556,100 @@ export class RegistryHTTPClient implements Registry {
       };
     } catch (err) {
       console.error(`Error doing get layer with ${namespace} and ${digest}: ` + errorString(err));
+      return {
+        response: new InternalError(),
+      };
+    }
+  }
+
+  async listReferrers(
+    name: string,
+    digest: string,
+    options?: {
+      artifactType?: string;
+      limit?: number;
+      last?: string;
+    },
+  ): Promise<ListReferrersResponse | RegistryError> {
+    const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
+    try {
+      const ctx = await this.authenticate(namespace);
+      const baseRequest = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/referrers/${digest}`);
+      const baseURL = new URL(baseRequest.url);
+      let req: Request;
+      const usesOpaqueCursor = options?.last !== undefined && isOpaqueReferrersCursor(options.last);
+      if (usesOpaqueCursor) {
+        const nextCursor = options!.last!;
+        const nextURL = nextCursor.startsWith("/")
+          ? new URL(nextCursor, `${this.url.protocol}//${this.url.host}`)
+          : new URL(nextCursor);
+        if (nextURL.origin !== baseURL.origin || nextURL.pathname !== baseURL.pathname) {
+          return {
+            response: new ServerError("invalid referrers cursor", 400),
+          };
+        }
+        req = new Request(nextURL, {
+          method: "GET",
+          headers: ctxIntoHeaders(ctx),
+        });
+      } else {
+        const params = new URLSearchParams();
+        if (options?.artifactType !== undefined) {
+          params.set("artifactType", options.artifactType);
+        }
+        if (options?.limit !== undefined) {
+          params.set("n", `${options.limit}`);
+        }
+        if (options?.last !== undefined) {
+          params.set("last", options.last);
+        }
+
+        req = ctxIntoRequest(
+          ctx,
+          this.url,
+          "GET",
+          `${namespace}/referrers/${digest}${params.size > 0 ? `?${params.toString()}` : ""}`,
+        );
+      }
+
+      const res = await fetch(req);
+      console.log(req.method, res.status, res.url);
+      if (!res.ok) {
+        return {
+          response: res,
+        };
+      }
+
+      const body = (await res.json()) as {
+        manifests?: ReferrerDescriptor[];
+        mediaType?: string;
+        schemaVersion?: number;
+      };
+      const contentType = res.headers.get("Content-Type")?.split(";")[0].trim();
+      if (
+        contentType !== ociImageIndexContentType ||
+        body.schemaVersion !== 2 ||
+        body.mediaType !== ociImageIndexContentType ||
+        !Array.isArray(body.manifests)
+      ) {
+        return {
+          response: new InternalError(),
+        };
+      }
+
+      const next = res.headers.get("Link");
+      let cursor: string | undefined;
+      if (next !== null) {
+        const nextURL = parseLinkHeaderURL(next, res.url);
+        cursor = nextURL !== null ? normalizeReferrersCursor(nextURL, new URL(req.url)) : undefined;
+      }
+
+      return {
+        manifests: body.manifests,
+        cursor,
+      };
+    } catch (err) {
+      console.error(`Error doing list referrers with ${namespace} and ${digest}: ` + errorString(err));
       return {
         response: new InternalError(),
       };

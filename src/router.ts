@@ -2,7 +2,7 @@ import { Router } from "itty-router";
 import { BlobUnknownError, ManifestUnknownError } from "./v2-errors";
 import { InternalError, ServerError } from "./errors";
 import { errorString, jsonHeaders, wrap } from "./utils";
-import { hexToDigest } from "./user";
+import { hexToDigest, isValidDigest } from "./user";
 import { ManifestTagsListTooBigError } from "./v2-responses";
 import { Env } from "..";
 import { MINIMUM_CHUNK, MAXIMUM_CHUNK, MAXIMUM_CHUNK_UPLOAD_SIZE } from "./chunk";
@@ -18,6 +18,14 @@ import {
   registries,
 } from "./registry/registry";
 import { RegistryHTTPClient } from "./registry/http";
+import { ociImageIndexContentType } from "./registry/r2";
+
+const maxReferrersListLimit = 1000;
+const isOpaqueReferrersCursor = (cursor: string) => cursor.startsWith("/v2/");
+
+function formatNextLink(url: URL): string {
+  return `<${url.toString()}>; rel="next"`;
+}
 
 const v2Router = Router({ base: "/v2/" });
 
@@ -50,29 +58,47 @@ v2Router.get("/_catalog", async (req, env: Env) => {
 });
 
 v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
-  // deleting a manifest works by retrieving the """main""" manifest that its key is a sha,
-  // and then going through every tag and removing it
+  // Deleting by digest removes every tag alias that points at that digest before removing
+  // the digest manifest itself. Deleting by tag only removes that tag entry.
   //
-  // after removing every tag, it's safe to remove the main manifest.
+  // If the deleted manifest is itself a referrer, remove its native subject-linked index entry.
+  // Subject-side referrer cleanup can be deferred until GC prunes those manifests.
   //
-  // if the transaction ends in an inconsistent state, the client can call this endpoint again
-  // and we would try to delete everything again
+  // If the transaction ends in an inconsistent state, the client can call this endpoint again
+  // and we will retry the cleanup.
   //
-  // we limit 1k tag deletions per request. If more we will return an error so client retries.
+  // We scan up to the requested number of manifest entries (default 1k) while looking for matching
+  // tag aliases. If more entries remain, return an error so the client can continue with the
+  // provided cursor.
   //
-  // If somehow we need to remove by paginating, we accept a last query param
+  // If somehow we need to remove by paginating, we accept a last query param.
 
   const { last, limit } = req.query;
   const { name, reference } = req.params;
-  // Reference is ALWAYS a sha256
   const manifest = await env.REGISTRY.head(`${name}/manifests/${reference}`);
   if (manifest === null) {
     return new Response(JSON.stringify(ManifestUnknownError(reference)), { status: 404, headers: jsonHeaders() });
   }
+  const manifestDigest = hexToDigest(manifest.checksums.sha256!);
+  let subjectDigest = manifest.customMetadata?.subjectDigest;
+  if (subjectDigest === undefined && manifest.customMetadata?.hasSubject !== "false") {
+    const manifestBody = await env.REGISTRY.get(`${name}/manifests/${reference}`);
+    if (manifestBody !== null) {
+      try {
+        const manifestJSON = (await manifestBody.json()) as { subject?: { digest: string } };
+        subjectDigest = manifestJSON.subject?.digest;
+      } catch {
+        subjectDigest = undefined;
+      }
+    }
+  }
   const limitInt = parseInt(limit?.toString() ?? "1000", 10);
+  if (!Number.isInteger(limitInt) || limitInt <= 0 || limitInt > 1000) {
+    throw new ServerError("invalid 'limit' parameter", 400);
+  }
   const tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
-    limit: isNaN(limitInt) ? 1000 : limitInt,
+    limit: limitInt,
     cursor: last?.toString(),
   });
   for (const tag of tags.objects) {
@@ -80,7 +106,7 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
       continue;
     }
 
-    if (hexToDigest(tag.checksums.sha256) === reference) {
+    if (hexToDigest(tag.checksums.sha256) === reference && tag.key !== `${name}/manifests/${reference}`) {
       await env.REGISTRY.delete(tag.key);
     }
   }
@@ -91,14 +117,20 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
     return new Response(JSON.stringify(ManifestTagsListTooBigError), {
       status: 400,
       headers: {
-        "Link": `${url.toString()}; rel=next`,
+        "Link": formatNextLink(url),
         "Content-Type": "application/json",
       },
     });
   }
 
-  // Last but not least, delete the digest manifest
+  // Last but not least, delete the manifest entry and remove the deleted manifest's own referrer
+  // index entry if it points at another subject.
   await env.REGISTRY.delete(`${name}/manifests/${reference}`);
+  if (reference === manifestDigest) {
+    if (subjectDigest !== undefined && isValidDigest(subjectDigest)) {
+      await env.REGISTRY.delete(`${name}/_referrers/${subjectDigest}/${manifestDigest}`);
+    }
+  }
   return new Response("", {
     status: 202,
     headers: {
@@ -265,8 +297,65 @@ v2Router.put("/:name+/manifests/:reference", async (req, env: Env) => {
     headers: {
       "Location": res.location,
       "Docker-Content-Digest": res.digest,
+      ...(res.subject ? { "OCI-Subject": res.subject } : {}),
     },
   });
+});
+
+v2Router.get("/:name+/referrers/:digest", async (req, env: Env) => {
+  const { name, digest } = req.params;
+  if (!isValidDigest(digest)) {
+    throw new ServerError("invalid digest", 400);
+  }
+
+  const { artifactType, last, n: nStr = 100 } = req.query;
+  const n = Number(nStr);
+  if (!Number.isInteger(n) || n <= 0 || n > maxReferrersListLimit) {
+    throw new ServerError("invalid 'n' parameter", 400);
+  }
+  if (last !== undefined && !isValidDigest(last.toString()) && !isOpaqueReferrersCursor(last.toString())) {
+    throw new ServerError("invalid 'last' parameter", 400);
+  }
+
+  const response = await env.REGISTRY_CLIENT.listReferrers(name, digest, {
+    artifactType: artifactType?.toString(),
+    last: last?.toString(),
+    limit: n,
+  });
+  if ("response" in response) {
+    return response.response;
+  }
+
+  const url = new URL(req.url);
+  url.searchParams.set("n", `${n}`);
+  if (artifactType !== undefined) {
+    url.searchParams.set("artifactType", artifactType.toString());
+  }
+  if (response.cursor !== undefined) {
+    url.searchParams.set("last", response.cursor);
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": ociImageIndexContentType,
+  };
+  if (artifactType !== undefined) {
+    headers["OCI-Filters-Applied"] = "artifactType";
+  }
+  if (response.cursor !== undefined) {
+    headers.Link = formatNextLink(url);
+  }
+
+  return new Response(
+    JSON.stringify({
+      schemaVersion: 2,
+      mediaType: ociImageIndexContentType,
+      manifests: response.manifests,
+    }),
+    {
+      status: 200,
+      headers,
+    },
+  );
 });
 
 v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionContext) => {
