@@ -1,10 +1,11 @@
 // We have 2 modes for the garbage collector, unreferenced and untagged.
 // Unreferenced will delete all blobs that are not referenced by any manifest.
-// Untagged will delete all blobs that are not referenced by any manifest and are not tagged.
+// Untagged will delete untagged manifests, any native referrer indexes tied to them, and any blobs
+// that are not referenced by the remaining manifests.
 
 import { ManifestSchema } from "../manifest";
 import { hexToDigest } from "../user";
-import {symlinkHeader} from "./r2";
+import { symlinkHeader } from "./r2";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -159,14 +160,14 @@ export class GarbageCollector {
     let cursor = listed.truncated ? listed.cursor : undefined;
 
     while (truncated) {
-      const next = await this.registry.list({ prefix, cursor });
+      const next = await this.registry.list({ prefix, cursor, include: ["customMetadata"] });
       for (const object of next.objects) {
         if ((await callback(object)) === false) {
           return false;
         }
       }
+      cursor = next.truncated ? next.cursor : undefined;
       truncated = next.truncated;
-      cursor = truncated ? cursor : undefined;
     }
     return true;
   }
@@ -199,33 +200,77 @@ export class GarbageCollector {
     // In untagged mode, search for manifest to delete
     if (options.mode === "untagged") {
       const manifestToRemove = new Set<string>();
-      const referencedManifests = new Set<string>();
-      // List tagged manifest to find manifest-list
-      for (const [_, manifests] of Object.entries(manifestList)) {
-        const taggedManifest = [...manifests].filter((item) => !item.split("/").pop()?.startsWith("sha256:"));
-        for (const manifestPath of taggedManifest) {
-          // Tagged manifest some, load manifest content
-          const manifest = await this.registry.get(manifestPath);
-          if (!manifest) {
-            continue;
-          }
+      const liveManifests = new Set<string>();
+      const pendingLiveManifests: string[] = [];
+      const referrerIndexByDigest = new Map<string, string[]>();
+      const referrerIndexBySubject = new Map<string, Array<{ key: string; referrerDigest: string }>>();
+      const referrerDigestsBySubject = new Map<string, Set<string>>();
+      const manifestHasTag = (manifests: Set<string>) => {
+        return [...manifests].some((item) => !item.split("/").pop()?.startsWith("sha256:"));
+      };
+      const markManifestLive = (digest: string) => {
+        if (liveManifests.has(digest)) {
+          return;
+        }
 
-          const manifestData = (await manifest.json()) as ManifestSchema;
-          // Search for manifest list
-          if (manifestData.schemaVersion == 2 && "manifests" in manifestData) {
-            // Extract referenced manifests from manifest list
-            manifestData.manifests.forEach((manifest) => {
-              referencedManifests.add(manifest.digest);
-            });
+        liveManifests.add(digest);
+        pendingLiveManifests.push(digest);
+      };
+      await this.list(`${options.name}/_referrers/`, async (object) => {
+        const parts = object.key.split("/");
+        const subjectDigest = parts[parts.length - 2];
+        const referrerDigest = parts[parts.length - 1];
+        const referrerIndexEntries = referrerIndexByDigest.get(referrerDigest) ?? [];
+        referrerIndexEntries.push(object.key);
+        referrerIndexByDigest.set(referrerDigest, referrerIndexEntries);
+        const subjectIndexEntries = referrerIndexBySubject.get(subjectDigest) ?? [];
+        subjectIndexEntries.push({ key: object.key, referrerDigest });
+        referrerIndexBySubject.set(subjectDigest, subjectIndexEntries);
+        const referrerDigests = referrerDigestsBySubject.get(subjectDigest) ?? new Set<string>();
+        referrerDigests.add(referrerDigest);
+        referrerDigestsBySubject.set(subjectDigest, referrerDigests);
+        return true;
+      });
+
+      // Seed the live set from tagged manifests, then walk manifest indexes and referrer links.
+      for (const [digest, manifests] of Object.entries(manifestList)) {
+        if (manifestHasTag(manifests)) {
+          markManifestLive(digest);
+        }
+      }
+
+      while (pendingLiveManifests.length > 0) {
+        const liveDigest = pendingLiveManifests.pop();
+        if (liveDigest === undefined) {
+          continue;
+        }
+
+        const manifestPath = manifestList[liveDigest]?.values().next().value;
+        if (manifestPath !== undefined) {
+          const manifest = await this.registry.get(manifestPath);
+          if (manifest !== null) {
+            const manifestData = (await manifest.json()) as ManifestSchema;
+            if (manifestData.schemaVersion === 2 && "manifests" in manifestData) {
+              manifestData.manifests.forEach((manifest) => {
+                markManifestLive(manifest.digest);
+              });
+            }
+          }
+        }
+
+        const referrerDigests = referrerDigestsBySubject.get(liveDigest);
+        if (referrerDigests !== undefined) {
+          for (const referrerDigest of referrerDigests) {
+            markManifestLive(referrerDigest);
           }
         }
       }
 
       for (const [key, manifests] of Object.entries(manifestList)) {
-        if (referencedManifests.has(key)) {
+        if (liveManifests.has(key)) {
           continue;
         }
-        if (![...manifests].some((item) => !item.split("/").pop()?.startsWith("sha256:"))) {
+        if (!manifestHasTag(manifests)) {
           // Add untagged manifest that should be removed
           manifests.forEach((manifest) => {
             manifestToRemove.add(manifest);
@@ -235,14 +280,38 @@ export class GarbageCollector {
         }
       }
 
-      // Deleting untagged manifest
+      // Delete untagged manifests and any native referrer index entries tied to them.
       if (manifestToRemove.size > 0) {
         if (!(await this.checkIfGCCanContinue(options.name, mark))) {
           throw new Error("there is a manifest insertion going, the garbage collection shall stop");
         }
 
-        // GC will deleted untagged manifest
-        await this.registry.delete(manifestToRemove.values().toArray());
+        const keysToDelete = new Set<string>(manifestToRemove);
+        const manifestDigestsToRemove = new Set(
+          [...manifestToRemove]
+            .map((manifestPath) => manifestPath.split("/").pop())
+            .filter((manifestDigest): manifestDigest is string => manifestDigest !== undefined),
+        );
+        for (const manifestPath of manifestToRemove) {
+          const manifestDigest = manifestPath.split("/").pop();
+          if (manifestDigest === undefined) {
+            continue;
+          }
+
+          const referrerIndexEntries = referrerIndexByDigest.get(manifestDigest);
+          if (referrerIndexEntries !== undefined) {
+            referrerIndexEntries.forEach((entry) => keysToDelete.add(entry));
+          }
+
+          const subjectIndexEntries = referrerIndexBySubject.get(manifestDigest);
+          if (subjectIndexEntries !== undefined) {
+            subjectIndexEntries
+              .filter((entry) => manifestDigestsToRemove.has(entry.referrerDigest))
+              .forEach((entry) => keysToDelete.add(entry.key));
+          }
+        }
+
+        await this.registry.delete([...keysToDelete]);
       }
     }
 
