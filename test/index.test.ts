@@ -7,6 +7,7 @@ import { RegistryAuthProtocolTokenPayload } from "../src/auth";
 import { registries } from "../src/registry/registry";
 import type { ReferrerDescriptor } from "../src/registry/registry";
 import { isDockerDotIO, RegistryHTTPClient } from "../src/registry/http";
+import { cloudchamberBtrfsChainArtifactType, singletonReferrerRecordPath } from "../src/registry/r2";
 import { encode } from "@cfworker/base64url";
 import { ManifestSchema } from "../src/manifest";
 import { limit } from "../src/chunk";
@@ -212,22 +213,27 @@ function manifestSize(schema: ManifestSchema): number {
   return new Blob([JSON.stringify(schema)]).size;
 }
 
+async function putManifestRequest(
+  name: string,
+  schema: ManifestSchema,
+  reference?: string,
+): Promise<{ sha256: string; response: Response }> {
+  const data = JSON.stringify(schema);
+  const sha256 = await getSHA256(data);
+  const response = await fetch(
+    createRequest("PUT", `/v2/${name}/manifests/${reference ?? sha256}`, new Blob([data]).stream(), {
+      "Content-Type": "application/gzip",
+    }),
+  );
+  return { sha256, response };
+}
+
 async function uploadManifest(
   name: string,
   schema: ManifestSchema,
   tag?: string,
 ): Promise<{ sha256: string; response: Response }> {
-  const data = JSON.stringify(schema);
-  const sha256 = await getSHA256(data);
-  if (!tag) {
-    tag = sha256;
-  }
-
-  const response = await fetch(
-    createRequest("PUT", `/v2/${name}/manifests/${tag}`, new Blob([data]).stream(), {
-      "Content-Type": "application/gzip",
-    }),
-  );
+  const { sha256, response } = await putManifestRequest(name, schema, tag);
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -486,7 +492,7 @@ describe("v2 referrers", () => {
       digest: subjectDigest,
       size: manifestSize(subjectManifest),
     };
-    const artifactType = "application/vnd.cloudchamber.btrfs-chain.v1";
+    const artifactType = "application/vnd.cloudchamber.test-referrer.v1";
     const artifactManifestOne = {
       ...getImageManifestV2(await generateManifest(name)),
       artifactType,
@@ -538,6 +544,279 @@ describe("v2 referrers", () => {
     expect(returnedDigests).toEqual(new Set([firstArtifactDigest, secondArtifactDigest]));
   });
 
+  test("Cloudchamber btrfs-chain artifacts are singleton referrers", async () => {
+    const name = "referrers-cloudchamber-singleton";
+    const bindings = env as Env;
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+    const subjectDescriptor = {
+      mediaType: subjectManifest.mediaType,
+      digest: subjectDigest,
+      size: manifestSize(subjectManifest),
+    };
+    const firstArtifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      annotations: {
+        "org.opencontainers.image.title": "chain-one",
+      },
+      subject: subjectDescriptor,
+    } satisfies ManifestSchema;
+    const secondArtifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      annotations: {
+        "org.opencontainers.image.title": "chain-two",
+      },
+      subject: subjectDescriptor,
+    } satisfies ManifestSchema;
+
+    const { sha256: firstArtifactDigest, response: firstArtifactResponse } = await putManifestRequest(
+      name,
+      firstArtifactManifest,
+    );
+    expect(firstArtifactResponse.status).toEqual(201);
+    expect(firstArtifactResponse.headers.get("oci-subject")).toEqual(subjectDigest);
+
+    const singletonRecord = await bindings.REGISTRY.get(
+      singletonReferrerRecordPath(name, subjectDigest, cloudchamberBtrfsChainArtifactType),
+    );
+    expect(singletonRecord).not.toBeNull();
+    expect(await singletonRecord?.json()).toMatchObject({
+      version: 1,
+      repository: name,
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      digest: firstArtifactDigest,
+      descriptor: {
+        mediaType: firstArtifactManifest.mediaType,
+        digest: firstArtifactDigest,
+        size: manifestSize(firstArtifactManifest),
+        artifactType: cloudchamberBtrfsChainArtifactType,
+        annotations: firstArtifactManifest.annotations,
+      },
+    });
+
+    const { response: secondArtifactResponse } = await putManifestRequest(name, secondArtifactManifest);
+    expect(secondArtifactResponse.status).toEqual(409);
+    expect(await secondArtifactResponse.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_EXISTS",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      committedDigest: firstArtifactDigest,
+    });
+
+    const idempotentResponse = await putManifestRequest(name, firstArtifactManifest, firstArtifactDigest);
+    expect(idempotentResponse.response.status).toEqual(201);
+    expect(idempotentResponse.response.headers.get("docker-content-digest")).toEqual(firstArtifactDigest);
+
+    await seedReferrerIndex(name, subjectDigest, [
+      {
+        mediaType: "application/vnd.oci.image.manifest.v1+json",
+        digest: numberedDigest(7777),
+        size: 1,
+        artifactType: cloudchamberBtrfsChainArtifactType,
+      },
+    ]);
+
+    const expectedDescriptor = {
+      mediaType: firstArtifactManifest.mediaType,
+      digest: firstArtifactDigest,
+      size: manifestSize(firstArtifactManifest),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      annotations: firstArtifactManifest.annotations,
+    };
+    const filteredReferrers = await getReferrersIndex(
+      name,
+      subjectDigest,
+      new URLSearchParams({ artifactType: cloudchamberBtrfsChainArtifactType }),
+    );
+    expect(filteredReferrers.body.manifests).toEqual([expectedDescriptor]);
+
+    const unfilteredReferrers = await getReferrersIndex(name, subjectDigest);
+    expect(
+      unfilteredReferrers.body.manifests.filter(
+        (manifest) => manifest.artifactType === cloudchamberBtrfsChainArtifactType,
+      ),
+    ).toEqual([expectedDescriptor]);
+  });
+
+  test("Cloudchamber btrfs-chain artifacts reject mutable tags", async () => {
+    const name = "referrers-cloudchamber-singleton-tag";
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+    const artifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: {
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
+      },
+    } satisfies ManifestSchema;
+
+    const { response } = await putManifestRequest(name, artifactManifest, "mutable-tag");
+    expect(response.status).toEqual(400);
+    expect((await response.json()) as { errors: { code: string }[] }).toEqual({
+      errors: [expect.objectContaining({ code: "TAG_INVALID" })],
+    });
+  });
+
+  test("Cloudchamber btrfs-chain singleton deletion is rejected", async () => {
+    const name = "referrers-cloudchamber-singleton-delete";
+    const bindings = env as Env;
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+    const artifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: {
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
+      },
+    } satisfies ManifestSchema;
+    const replacementManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: artifactManifest.subject,
+    } satisfies ManifestSchema;
+
+    const { sha256: artifactDigest } = await uploadManifest(name, artifactManifest);
+    const deleteResponse = await fetch(createRequest("DELETE", `/v2/${name}/manifests/${artifactDigest}`, null));
+    expect(deleteResponse.status).toEqual(409);
+    expect(await deleteResponse.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_EXISTS",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      committedDigest: artifactDigest,
+    });
+    expect(await bindings.REGISTRY.head(`${name}/manifests/${artifactDigest}`)).toBeTruthy();
+
+    const { response: replacementResponse } = await putManifestRequest(name, replacementManifest);
+    expect(replacementResponse.status).toEqual(409);
+    expect(await replacementResponse.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_EXISTS",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      committedDigest: artifactDigest,
+    });
+  });
+
+  test("Cloudchamber btrfs-chain singleton corruption is reported", async () => {
+    const name = "referrers-cloudchamber-singleton-corrupt";
+    const bindings = env as Env;
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+    const artifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: {
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
+      },
+    } satisfies ManifestSchema;
+    const replacementManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: artifactManifest.subject,
+    } satisfies ManifestSchema;
+
+    const { sha256: artifactDigest } = await uploadManifest(name, artifactManifest);
+    await bindings.REGISTRY.delete(`${name}/manifests/${artifactDigest}`);
+
+    const referrersResponse = await fetch(
+      createRequest(
+        "GET",
+        `/v2/${name}/referrers/${subjectDigest}?artifactType=${encodeURIComponent(cloudchamberBtrfsChainArtifactType)}`,
+        null,
+      ),
+    );
+    expect(referrersResponse.status).toEqual(500);
+    expect(await referrersResponse.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_CORRUPT",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      reason: `committed manifest ${artifactDigest} is missing`,
+    });
+
+    const { response: replacementResponse } = await putManifestRequest(name, replacementManifest);
+    expect(replacementResponse.status).toEqual(409);
+    expect(await replacementResponse.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_CORRUPT",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      reason: `committed manifest ${artifactDigest} is missing`,
+    });
+  });
+
+  test("Cloudchamber btrfs-chain malformed singleton records are reported", async () => {
+    const name = "referrers-cloudchamber-singleton-malformed";
+    const bindings = env as Env;
+    const subjectDigest = numberedDigest(7788);
+    await bindings.REGISTRY.put(singletonReferrerRecordPath(name, subjectDigest, cloudchamberBtrfsChainArtifactType), "{", {
+      httpMetadata: { contentType: "application/json" },
+    });
+
+    const response = await fetch(
+      createRequest(
+        "GET",
+        `/v2/${name}/referrers/${subjectDigest}?artifactType=${encodeURIComponent(cloudchamberBtrfsChainArtifactType)}`,
+        null,
+      ),
+    );
+    expect(response.status).toEqual(500);
+    expect(await response.json()).toEqual({
+      code: "SINGLETON_ARTIFACT_CORRUPT",
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      reason: "singleton record is not valid JSON",
+    });
+  });
+
+  test("GC keeps committed Cloudchamber btrfs-chain singleton artifacts", async () => {
+    const name = "referrers-cloudchamber-singleton-gc";
+    const bindings = env as Env;
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+    const childManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: childDigest } = await createManifest(name, childManifest);
+    const artifactIndex = {
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.index.v1+json",
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      subject: {
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
+      },
+      manifests: [
+        {
+          mediaType: childManifest.mediaType,
+          digest: childDigest,
+          size: manifestSize(childManifest),
+        },
+      ],
+    } satisfies ManifestSchema;
+    const { sha256: artifactDigest } = await uploadManifest(name, artifactIndex);
+
+    const subjectTagDeleteResponse = await fetch(createRequest("DELETE", `/v2/${name}/manifests/latest`, null));
+    expect(subjectTagDeleteResponse.status).toEqual(202);
+
+    await runGarbageCollector(name, "untagged");
+    expect(await bindings.REGISTRY.head(`${name}/manifests/${subjectDigest}`)).toBeNull();
+    expect(await bindings.REGISTRY.head(`${name}/manifests/${artifactDigest}`)).toBeTruthy();
+    expect(await bindings.REGISTRY.head(`${name}/manifests/${childDigest}`)).toBeTruthy();
+
+    const referrers = await getReferrersIndex(
+      name,
+      subjectDigest,
+      new URLSearchParams({ artifactType: cloudchamberBtrfsChainArtifactType }),
+    );
+    expect(referrers.body.manifests.map((manifest) => manifest.digest)).toEqual([artifactDigest]);
+  });
+
   test("GET /v2/:name/referrers/:digest filters descriptors and returns empty results", async () => {
     const name = "referrers-filter";
     const subjectManifest = getImageManifestV2(await generateManifest(name));
@@ -548,7 +827,7 @@ describe("v2 referrers", () => {
       size: manifestSize(subjectManifest),
     };
 
-    const explicitArtifactType = "application/vnd.cloudchamber.btrfs-chain.v1";
+    const explicitArtifactType = "application/vnd.cloudchamber.test-referrer.v1";
     const derivedArtifactType = "application/vnd.cloudchamber.chain.config.v1+json";
     const explicitArtifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
@@ -644,7 +923,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -700,7 +979,7 @@ describe("v2 referrers", () => {
     const childManifest = getImageManifestV2(await generateManifest(name));
     const { sha256: childDigest } = await createManifest(name, childManifest, "child");
 
-    const artifactType = "application/vnd.cloudchamber.btrfs-chain.v1";
+    const artifactType = "application/vnd.cloudchamber.test-referrer.v1";
     const artifactIndex = {
       schemaVersion: 2,
       mediaType: "application/vnd.oci.image.index.v1+json",
@@ -762,7 +1041,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -792,7 +1071,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -839,7 +1118,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -859,7 +1138,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const firstArtifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       annotations: {
         "org.opencontainers.image.title": "chain-one",
       },
@@ -871,7 +1150,7 @@ describe("v2 referrers", () => {
     } satisfies ManifestSchema;
     const secondArtifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       annotations: {
         "org.opencontainers.image.title": "chain-two",
       },
@@ -905,7 +1184,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -932,7 +1211,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -974,7 +1253,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       annotations: {
         "org.opencontainers.image.title": "tagged-referrer",
       },
@@ -1018,7 +1297,7 @@ describe("v2 referrers", () => {
     const artifactIndex = {
       schemaVersion: 2,
       mediaType: "application/vnd.oci.image.index.v1+json",
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -1055,7 +1334,7 @@ describe("v2 referrers", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -1081,7 +1360,7 @@ describe("v2 referrers", () => {
     const name = "referrers-invalid-subject";
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: "application/vnd.oci.image.manifest.v1+json",
         digest: "sha256/not-a-digest",
@@ -1134,7 +1413,7 @@ describe("v2 referrers", () => {
     const invalidIndex = {
       schemaVersion: 2,
       mediaType: "application/vnd.oci.image.index.v1+json",
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,
@@ -1451,7 +1730,7 @@ describe("http client", () => {
   test("test list referrers", async () => {
     const name = "http-client-referrers";
     const subjectDigest = numberedDigest(9997);
-    const artifactType = "application/vnd.cloudchamber.btrfs-chain.v1";
+    const artifactType = "application/vnd.cloudchamber.test-referrer.v1";
     const firstArtifactDigest = numberedDigest(9998);
     const secondArtifactDigest = numberedDigest(9999);
     const firstDescriptor = {
@@ -1950,7 +2229,7 @@ describe("push and catalog", () => {
     const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
-      artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
+      artifactType: "application/vnd.cloudchamber.test-referrer.v1",
       subject: {
         mediaType: subjectManifest.mediaType,
         digest: subjectDigest,

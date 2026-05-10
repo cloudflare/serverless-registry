@@ -6,6 +6,7 @@ import { hexToDigest, isValidDigest } from "./user";
 import { ManifestTagsListTooBigError } from "./v2-responses";
 import { Env } from "..";
 import { MINIMUM_CHUNK, MAXIMUM_CHUNK, MAXIMUM_CHUNK_UPLOAD_SIZE } from "./chunk";
+import { manifestSchema } from "./manifest";
 import {
   CheckLayerResponse,
   CheckManifestResponse,
@@ -18,7 +19,13 @@ import {
   registries,
 } from "./registry/registry";
 import { RegistryHTTPClient } from "./registry/http";
-import { ociImageIndexContentType } from "./registry/r2";
+import {
+  artifactTypeFromManifest,
+  cloudchamberBtrfsChainArtifactType,
+  getCloudchamberSingletonReferrerRecord,
+  ociImageIndexContentType,
+  singletonArtifactExistsResponse,
+} from "./registry/r2";
 
 const maxReferrersListLimit = 1000;
 const isOpaqueReferrersCursor = (cursor: string) => cursor.startsWith("/v2/");
@@ -81,14 +88,19 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   }
   const manifestDigest = hexToDigest(manifest.checksums.sha256!);
   let subjectDigest = manifest.customMetadata?.subjectDigest;
-  if (subjectDigest === undefined && manifest.customMetadata?.hasSubject !== "false") {
+  let artifactType = manifest.customMetadata?.artifactType;
+  if (manifest.customMetadata?.hasSubject !== "false" || artifactType === undefined) {
     const manifestBody = await env.REGISTRY.get(`${name}/manifests/${reference}`);
     if (manifestBody !== null) {
       try {
-        const manifestJSON = (await manifestBody.json()) as { subject?: { digest: string } };
-        subjectDigest = manifestJSON.subject?.digest;
+        const manifestJSON = await manifestBody.json();
+        const parsedManifest = manifestSchema.safeParse(manifestJSON);
+        if (parsedManifest.success) {
+          subjectDigest = parsedManifest.data.schemaVersion === 2 ? parsedManifest.data.subject?.digest : undefined;
+          artifactType = artifactTypeFromManifest(parsedManifest.data);
+        }
       } catch {
-        subjectDigest = undefined;
+        subjectDigest = manifest.customMetadata?.subjectDigest;
       }
     }
   }
@@ -96,6 +108,23 @@ v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
   if (!Number.isInteger(limitInt) || limitInt <= 0 || limitInt > 1000) {
     throw new ServerError("invalid 'limit' parameter", 400);
   }
+
+  if (reference === manifestDigest && subjectDigest !== undefined && artifactType === cloudchamberBtrfsChainArtifactType) {
+    const singletonRecord = await getCloudchamberSingletonReferrerRecord(
+      env,
+      name,
+      subjectDigest,
+      cloudchamberBtrfsChainArtifactType,
+      { validateManifest: false },
+    );
+    if (singletonRecord !== null && "response" in singletonRecord) {
+      return singletonRecord.response;
+    }
+    if (singletonRecord?.digest === manifestDigest) {
+      return singletonArtifactExistsResponse(subjectDigest, cloudchamberBtrfsChainArtifactType, manifestDigest);
+    }
+  }
+
   const tags = await env.REGISTRY.list({
     prefix: `${name}/manifests`,
     limit: limitInt,

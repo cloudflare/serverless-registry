@@ -5,7 +5,12 @@
 
 import { ManifestSchema } from "../manifest";
 import { hexToDigest } from "../user";
-import { symlinkHeader } from "./r2";
+import {
+  cloudchamberBtrfsChainArtifactType,
+  parseCloudchamberSingletonReferrerRecord,
+  singletonReferrerRecordsPrefix,
+  symlinkHeader,
+} from "./r2";
 
 export type GarbageCollectionMode = "unreferenced" | "untagged";
 export type GCOptions = {
@@ -205,6 +210,7 @@ export class GarbageCollector {
       const referrerIndexByDigest = new Map<string, string[]>();
       const referrerIndexBySubject = new Map<string, Array<{ key: string; referrerDigest: string }>>();
       const referrerDigestsBySubject = new Map<string, Set<string>>();
+      const singletonReferrerDigests = new Set<string>();
       const manifestHasTag = (manifests: Set<string>) => {
         return [...manifests].some((item) => !item.split("/").pop()?.startsWith("sha256:"));
       };
@@ -231,6 +237,25 @@ export class GarbageCollector {
         referrerDigestsBySubject.set(subjectDigest, referrerDigests);
         return true;
       });
+      await this.list(singletonReferrerRecordsPrefix(options.name), async (object) => {
+        const recordObject = await this.registry.get(object.key);
+        if (recordObject === null) {
+          return true;
+        }
+
+        let recordJSON: unknown;
+        try {
+          recordJSON = await recordObject.json();
+        } catch {
+          return true;
+        }
+
+        const record = parseCloudchamberSingletonReferrerRecord(recordJSON);
+        if (record?.repository === options.name && record.artifactType === cloudchamberBtrfsChainArtifactType) {
+          singletonReferrerDigests.add(record.digest);
+        }
+        return true;
+      });
 
       // Seed the live set from tagged manifests, then walk manifest indexes and referrer links.
       for (const [digest, manifests] of Object.entries(manifestList)) {
@@ -238,6 +263,7 @@ export class GarbageCollector {
           markManifestLive(digest);
         }
       }
+      singletonReferrerDigests.forEach(markManifestLive);
 
       while (pendingLiveManifests.length > 0) {
         const liveDigest = pendingLiveManifests.pop();

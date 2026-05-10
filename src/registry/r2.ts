@@ -1,4 +1,5 @@
 import { Env } from "../..";
+import { encode } from "@cfworker/base64url";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 import {
   MINIMUM_CHUNK,
@@ -11,7 +12,7 @@ import {
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
 import { SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
-import { readableToBlob, readerToBlob, wrap } from "../utils";
+import { jsonHeaders, readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
   CheckLayerResponse,
@@ -33,6 +34,93 @@ import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
 
 export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
+export const cloudchamberBtrfsChainArtifactType = "application/vnd.cloudchamber.btrfs-chain.v1";
+
+const cloudchamberSingletonReferrerRecordVersion = 1;
+
+export type CloudchamberSingletonReferrerRecord = {
+  version: 1;
+  repository: string;
+  subjectDigest: string;
+  artifactType: string;
+  digest: string;
+  descriptor: ReferrerDescriptor;
+  createdAtMs: number;
+};
+
+type SingletonConflictResponse = {
+  code: "SINGLETON_ARTIFACT_EXISTS";
+  subjectDigest: string;
+  artifactType: string;
+  committedDigest: string;
+};
+
+type SingletonCorruptResponse = {
+  code: "SINGLETON_ARTIFACT_CORRUPT";
+  subjectDigest: string;
+  artifactType: string;
+  reason: string;
+};
+
+export function singletonArtifactExistsResponse(
+  subjectDigest: string,
+  artifactType: string,
+  committedDigest: string,
+): Response {
+  const body: SingletonConflictResponse = {
+    code: "SINGLETON_ARTIFACT_EXISTS",
+    subjectDigest,
+    artifactType,
+    committedDigest,
+  };
+  return new Response(JSON.stringify(body), { status: 409, headers: jsonHeaders() });
+}
+
+export function singletonArtifactCorruptResponse(
+  subjectDigest: string,
+  artifactType: string,
+  reason: string,
+  status = 500,
+): Response {
+  const body: SingletonCorruptResponse = {
+    code: "SINGLETON_ARTIFACT_CORRUPT",
+    subjectDigest,
+    artifactType,
+    reason,
+  };
+  return new Response(JSON.stringify(body), { status, headers: jsonHeaders() });
+}
+
+function singletonArtifactExistsError(
+  subjectDigest: string,
+  artifactType: string,
+  committedDigest: string,
+): RegistryError {
+  return { response: singletonArtifactExistsResponse(subjectDigest, artifactType, committedDigest) };
+}
+
+function singletonArtifactCorruptError(
+  subjectDigest: string,
+  artifactType: string,
+  reason: string,
+  status?: number,
+): RegistryError {
+  return { response: singletonArtifactCorruptResponse(subjectDigest, artifactType, reason, status) };
+}
+
+export function isCloudchamberSingletonArtifactType(
+  artifactType: string | undefined,
+): artifactType is typeof cloudchamberBtrfsChainArtifactType {
+  return artifactType === cloudchamberBtrfsChainArtifactType;
+}
+
+export function singletonReferrerRecordsPrefix(name: string): string {
+  return `${name}/_cloudchamber/singletons/referrers/`;
+}
+
+export function singletonReferrerRecordPath(name: string, subjectDigest: string, artifactType: string): string {
+  return `${singletonReferrerRecordsPrefix(name)}${subjectDigest}/${encode(artifactType)}`;
+}
 
 function referrersPrefix(name: string, digest: string): string {
   return `${name}/_referrers/${digest}/`;
@@ -42,7 +130,7 @@ function referrersPath(name: string, subjectDigest: string, digest: string): str
   return `${referrersPrefix(name, subjectDigest)}${digest}`;
 }
 
-function artifactTypeFromManifest(manifest: ManifestSchema): string | undefined {
+export function artifactTypeFromManifest(manifest: ManifestSchema): string | undefined {
   if (manifest.schemaVersion !== 2) {
     return undefined;
   }
@@ -124,6 +212,118 @@ function parseStoredReferrerDescriptor(descriptor: unknown, expectedDigest: stri
   }
 
   return parsedDescriptor;
+}
+
+export function parseCloudchamberSingletonReferrerRecord(
+  record: unknown,
+): CloudchamberSingletonReferrerRecord | null {
+  if (typeof record !== "object" || record === null) {
+    return null;
+  }
+
+  const candidate = record as Record<string, unknown>;
+  if (
+    candidate.version !== cloudchamberSingletonReferrerRecordVersion ||
+    typeof candidate.repository !== "string" ||
+    typeof candidate.subjectDigest !== "string" ||
+    !isValidDigest(candidate.subjectDigest) ||
+    typeof candidate.artifactType !== "string" ||
+    !isCloudchamberSingletonArtifactType(candidate.artifactType) ||
+    typeof candidate.digest !== "string" ||
+    !isValidDigest(candidate.digest) ||
+    typeof candidate.createdAtMs !== "number" ||
+    !Number.isInteger(candidate.createdAtMs) ||
+    candidate.createdAtMs < 0
+  ) {
+    return null;
+  }
+
+  const parsedDescriptor = parseStoredReferrerDescriptor(candidate.descriptor, candidate.digest);
+  if (parsedDescriptor === null || parsedDescriptor.artifactType !== candidate.artifactType) {
+    return null;
+  }
+
+  return {
+    version: cloudchamberSingletonReferrerRecordVersion,
+    repository: candidate.repository,
+    subjectDigest: candidate.subjectDigest,
+    artifactType: candidate.artifactType,
+    digest: candidate.digest,
+    descriptor: parsedDescriptor,
+    createdAtMs: candidate.createdAtMs,
+  };
+}
+
+async function validateSingletonManifestObject(
+  env: Env,
+  name: string,
+  record: CloudchamberSingletonReferrerRecord,
+): Promise<string | null> {
+  const manifestObject = await env.REGISTRY.get(`${name}/manifests/${record.digest}`);
+  if (manifestObject === null) {
+    return `committed manifest ${record.digest} is missing`;
+  }
+
+  let manifestJSON: unknown;
+  try {
+    manifestJSON = await manifestObject.json();
+  } catch {
+    return `committed manifest ${record.digest} is not valid JSON`;
+  }
+
+  const manifestResult = manifestSchema.safeParse(manifestJSON);
+  if (!manifestResult.success) {
+    return `committed manifest ${record.digest} is invalid`;
+  }
+
+  const manifest = manifestResult.data;
+  if (manifest.schemaVersion !== 2 || manifest.subject?.digest !== record.subjectDigest) {
+    return `committed manifest ${record.digest} does not match singleton subject`;
+  }
+
+  const descriptor = descriptorFromManifest(manifest, record.digest, manifestObject.size);
+  if (descriptor === null || descriptor.artifactType !== record.artifactType) {
+    return `committed manifest ${record.digest} does not match singleton artifact type`;
+  }
+
+  return null;
+}
+
+export async function getCloudchamberSingletonReferrerRecord(
+  env: Env,
+  name: string,
+  subjectDigest: string,
+  artifactType: string,
+  options: { validateManifest?: boolean } = {},
+): Promise<CloudchamberSingletonReferrerRecord | RegistryError | null> {
+  const recordObject = await env.REGISTRY.get(singletonReferrerRecordPath(name, subjectDigest, artifactType));
+  if (recordObject === null) {
+    return null;
+  }
+
+  let recordJSON: unknown;
+  try {
+    recordJSON = await recordObject.json();
+  } catch {
+    return singletonArtifactCorruptError(subjectDigest, artifactType, "singleton record is not valid JSON");
+  }
+
+  const record = parseCloudchamberSingletonReferrerRecord(recordJSON);
+  if (record === null) {
+    return singletonArtifactCorruptError(subjectDigest, artifactType, "singleton record has invalid shape");
+  }
+  if (record.repository !== name || record.subjectDigest !== subjectDigest || record.artifactType !== artifactType) {
+    return singletonArtifactCorruptError(subjectDigest, artifactType, "singleton record identity does not match key");
+  }
+
+  if (options.validateManifest === true) {
+    const corruptionReason = await validateSingletonManifestObject(env, name, record);
+    if (corruptionReason !== null) {
+      return singletonArtifactCorruptError(subjectDigest, artifactType, corruptionReason);
+    }
+  }
+
+  return record;
 }
 
 export type Chunk =
@@ -230,6 +430,131 @@ export class R2Registry implements Registry {
 
   constructor(private env: Env) {
     this.gc = new GarbageCollector(this.env.REGISTRY);
+  }
+
+  private async putReferrerDescriptor(
+    name: string,
+    subjectDigest: string,
+    digest: string,
+    descriptor: ReferrerDescriptor,
+  ): Promise<void> {
+    await this.env.REGISTRY.put(referrersPath(name, subjectDigest, digest), JSON.stringify(descriptor), {
+      httpMetadata: {
+        contentType: "application/json",
+      },
+    });
+  }
+
+  private async putSingletonManifest(
+    name: string,
+    subjectDigest: string,
+    digest: string,
+    descriptor: ReferrerDescriptor,
+    text: string,
+    sha256: ArrayBuffer,
+    contentType: string,
+    customMetadata: Record<string, string>,
+  ): Promise<PutManifestResponse | RegistryError> {
+    const existingRecord = await getCloudchamberSingletonReferrerRecord(
+      this.env,
+      name,
+      subjectDigest,
+      cloudchamberBtrfsChainArtifactType,
+      { validateManifest: false },
+    );
+    if (existingRecord !== null && "response" in existingRecord) {
+      return existingRecord;
+    }
+    if (existingRecord !== null) {
+      if (existingRecord.digest !== digest) {
+        const corruptionReason = await validateSingletonManifestObject(this.env, name, existingRecord);
+        if (corruptionReason !== null) {
+          return singletonArtifactCorruptError(
+            subjectDigest,
+            cloudchamberBtrfsChainArtifactType,
+            corruptionReason,
+            409,
+          );
+        }
+        return singletonArtifactExistsError(subjectDigest, cloudchamberBtrfsChainArtifactType, existingRecord.digest);
+      }
+
+      await this.env.REGISTRY.put(`${name}/manifests/${digest}`, text, {
+        sha256,
+        httpMetadata: { contentType },
+        customMetadata,
+      });
+      await this.putReferrerDescriptor(name, subjectDigest, digest, descriptor);
+      return {
+        digest,
+        location: `/v2/${name}/manifests/${digest}`,
+        subject: subjectDigest,
+      };
+    }
+
+    await this.env.REGISTRY.put(`${name}/manifests/${digest}`, text, {
+      sha256,
+      httpMetadata: { contentType },
+      customMetadata,
+    });
+
+    const record: CloudchamberSingletonReferrerRecord = {
+      version: cloudchamberSingletonReferrerRecordVersion,
+      repository: name,
+      subjectDigest,
+      artifactType: cloudchamberBtrfsChainArtifactType,
+      digest,
+      descriptor,
+      createdAtMs: Date.now(),
+    };
+    const recordWrite = await this.env.REGISTRY.put(
+      singletonReferrerRecordPath(name, subjectDigest, cloudchamberBtrfsChainArtifactType),
+      JSON.stringify(record),
+      {
+        onlyIf: { etagDoesNotMatch: "*" },
+        httpMetadata: { contentType: "application/json" },
+      },
+    );
+
+    if (recordWrite === null) {
+      const committedRecord = await getCloudchamberSingletonReferrerRecord(
+        this.env,
+        name,
+        subjectDigest,
+        cloudchamberBtrfsChainArtifactType,
+        { validateManifest: false },
+      );
+      if (committedRecord === null) {
+        return singletonArtifactCorruptError(
+          subjectDigest,
+          cloudchamberBtrfsChainArtifactType,
+          "singleton record create lost the race but no committed record exists",
+          409,
+        );
+      }
+      if ("response" in committedRecord) {
+        return committedRecord;
+      }
+      if (committedRecord.digest !== digest) {
+        const corruptionReason = await validateSingletonManifestObject(this.env, name, committedRecord);
+        if (corruptionReason !== null) {
+          return singletonArtifactCorruptError(
+            subjectDigest,
+            cloudchamberBtrfsChainArtifactType,
+            corruptionReason,
+            409,
+          );
+        }
+        return singletonArtifactExistsError(subjectDigest, cloudchamberBtrfsChainArtifactType, committedRecord.digest);
+      }
+    }
+
+    await this.putReferrerDescriptor(name, subjectDigest, digest, descriptor);
+    return {
+      digest,
+      location: `/v2/${name}/manifests/${digest}`,
+      subject: subjectDigest,
+    };
   }
 
   async manifestExists(name: string, reference: string): Promise<RegistryError | CheckManifestResponse> {
@@ -402,14 +727,42 @@ export class R2Registry implements Registry {
     }
 
     const limit = Math.min(Math.max(Math.trunc(options?.limit ?? 100), 1), 1000);
+    const shouldReadSingleton =
+      options?.artifactType === undefined || isCloudchamberSingletonArtifactType(options.artifactType);
+    let singletonDescriptor: ReferrerDescriptor | undefined;
+    if (shouldReadSingleton) {
+      const singletonRecord = await getCloudchamberSingletonReferrerRecord(
+        this.env,
+        name,
+        digest,
+        cloudchamberBtrfsChainArtifactType,
+        { validateManifest: true },
+      );
+      if (singletonRecord !== null && "response" in singletonRecord) {
+        return singletonRecord;
+      }
+      singletonDescriptor = singletonRecord?.descriptor;
+    }
+
+    if (isCloudchamberSingletonArtifactType(options?.artifactType)) {
+      if (singletonDescriptor === undefined || options?.last !== undefined) {
+        return { manifests: [] };
+      }
+      return { manifests: [singletonDescriptor] };
+    }
+
     const prefix = referrersPrefix(name, digest);
-    const manifests: ReferrerDescriptor[] = [];
+    const manifests: ReferrerDescriptor[] =
+      singletonDescriptor !== undefined && options?.last === undefined ? [singletonDescriptor] : [];
     const pageSize = Math.min(Math.max(limit + 1, 100), 1000);
 
     let objects = await this.env.REGISTRY.list({
       prefix,
       limit: pageSize,
-      startAfter: options?.last ? referrersPath(name, digest, options.last) : undefined,
+      startAfter:
+        options?.last !== undefined && options.last !== singletonDescriptor?.digest
+          ? referrersPath(name, digest, options.last)
+          : undefined,
     });
 
     while (true) {
@@ -433,6 +786,10 @@ export class R2Registry implements Registry {
 
         const descriptor = parseStoredReferrerDescriptor(descriptorJSON, expectedDigest);
         if (descriptor === null) {
+          continue;
+        }
+
+        if (isCloudchamberSingletonArtifactType(descriptor.artifactType)) {
           continue;
         }
 
@@ -561,7 +918,34 @@ export class R2Registry implements Registry {
     const customMetadata = {
       hasSubject: subjectDigest !== undefined ? "true" : "false",
       ...(subjectDigest !== undefined ? { subjectDigest } : {}),
+      ...(referrerDescriptor?.artifactType !== undefined ? { artifactType: referrerDescriptor.artifactType } : {}),
     };
+
+    if (
+      referrerDescriptor !== null &&
+      subjectDigest !== undefined &&
+      isCloudchamberSingletonArtifactType(referrerDescriptor.artifactType)
+    ) {
+      if (reference !== digestStr) {
+        return {
+          response: new ManifestError(
+            "TAG_INVALID",
+            `${cloudchamberBtrfsChainArtifactType} artifacts must be published by digest`,
+          ),
+        };
+      }
+
+      return await this.putSingletonManifest(
+        name,
+        subjectDigest,
+        digestStr,
+        referrerDescriptor,
+        text,
+        digest,
+        contentType,
+        customMetadata,
+      );
+    }
 
     const putReference = async () => {
       // if the reference is the same as a digest, it's not necessary to insert
@@ -588,13 +972,7 @@ export class R2Registry implements Registry {
     ];
 
     if (referrerDescriptor !== null && subjectDigest !== undefined) {
-      putTasks.push(
-        env.REGISTRY.put(referrersPath(name, subjectDigest, digestStr), JSON.stringify(referrerDescriptor), {
-          httpMetadata: {
-            contentType: "application/json",
-          },
-        }),
-      );
+      putTasks.push(this.putReferrerDescriptor(name, subjectDigest, digestStr, referrerDescriptor));
     }
 
     await Promise.all(putTasks);
