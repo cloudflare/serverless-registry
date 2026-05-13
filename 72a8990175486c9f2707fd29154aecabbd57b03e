@@ -1,0 +1,23 @@
+.github/workflows/test.yml
+  f63b2e46c61ceca0 13,15,17,19,21,24,26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "72a8990175486c9f2707fd29154aecabbd57b03e",
+  "prompts": {
+    "f63b2e46c61ceca0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1dd04e2d1ffeRjP6VHvS7dOm12",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Matt Johnson-Pint",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 10,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
