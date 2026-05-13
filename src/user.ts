@@ -38,7 +38,7 @@ export function isValidDigest(digest: string): boolean {
   return true;
 }
 
-function stringToArrayBuffer(s: string): ArrayBuffer {
+function stringToArrayBuffer(s: string): Uint8Array {
   const encoder = new TextEncoder();
   const arr = encoder.encode(s);
   return arr;

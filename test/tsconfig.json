@@ -1,13 +1,15 @@
 {
-  "include": ["vitest.config.ts"],
   "compilerOptions": {
-    "strict": true,
+    "types": ["../worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"],
     "module": "esnext",
     "target": "esnext",
     "lib": ["esnext"],
     "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
-    "allowSyntheticDefaultImports": true
-  }
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "strictNullChecks": true
+  },
+  "include": ["./**/*.ts", "./*.ts"]
 }

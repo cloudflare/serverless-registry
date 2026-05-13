@@ -1,4 +1,4 @@
-import { ZodError } from "zod";
+import { prettifyError, ZodError } from "zod";
 
 export async function readableToBlob(
   reader: ReadableStreamDefaultReader,
@@ -47,10 +47,7 @@ export async function consumeReadable(reader: ReadableStreamDefaultReader) {
 
 export function errorString(err: unknown): string {
   if (err instanceof ZodError) {
-    const errorsMsg = err.errors
-      .map((zodIssue) => `- ${zodIssue.code}: ${zodIssue.message}: ${zodIssue.path}`)
-      .join("\n\t");
-    return `zod error: ${errorsMsg}`;
+    return `zod error:\n${prettifyError(err)}`;
   }
 
   if (err instanceof Error) {

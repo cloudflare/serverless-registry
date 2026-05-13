@@ -21,7 +21,7 @@ export async function getChunkBlob(env: Env, chunk: Chunk): Promise<Blob | null>
       // not necessary, this is a correct chunk always.
       return null;
     case "small-chunk":
-    case "multi-part-chunk-no-same-size":
+    case "multi-part-chunk-no-same-size": {
       const res = await env.REGISTRY.get(chunk.r2Path);
       if (res === null) {
         throw new InternalError();
@@ -31,6 +31,7 @@ export async function getChunkBlob(env: Env, chunk: Chunk): Promise<Blob | null>
       // below wouldn't work
       const blob = await res.blob();
       return blob;
+    }
   }
 }
 

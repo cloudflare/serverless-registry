@@ -307,7 +307,7 @@ export class RegistryHTTPClient implements Registry {
   async monolithicUpload(
     _namespace: string,
     _expectedSha: string,
-    _stream: ReadableStream<any>,
+    _stream: ReadableStream,
     _size: number,
   ): Promise<false | FinishedUploadObject | RegistryError> {
     // please, just give me chunked things
@@ -667,8 +667,8 @@ export class RegistryHTTPClient implements Registry {
   putManifest(
     _namespace: string,
     _reference: string,
-    _readableStream: ReadableStream<any>,
-    {}: {},
+    _readableStream: ReadableStream,
+    _options: { contentType: string; checkLayers?: boolean },
   ): Promise<PutManifestResponse | RegistryError> {
     throw new Error("unimplemented");
   }
@@ -689,7 +689,7 @@ export class RegistryHTTPClient implements Registry {
     _namespace: string,
     _uploadId: string,
     _location: string,
-    _stream: ReadableStream<any>,
+    _stream: ReadableStream,
     _length?: number | undefined,
     _range?: [number, number] | undefined,
   ): Promise<RegistryError | UploadObject> {
@@ -701,7 +701,7 @@ export class RegistryHTTPClient implements Registry {
     _uploadId: string,
     _location: string,
     _expectedSha: string,
-    _stream?: ReadableStream<any> | undefined,
+    _stream?: ReadableStream | undefined,
     _length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
     throw new Error("unimplemented");
