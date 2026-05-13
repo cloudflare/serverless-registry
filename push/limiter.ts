@@ -20,7 +20,7 @@ export class ReadableLimiter extends stream.Readable {
     if (previousReader) this.leftover = previousReader.leftover;
   }
 
-  _read(): void {
+  override _read(): void {
     if (this.limit === 0) {
       this.push(null);
     }

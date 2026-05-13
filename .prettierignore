@@ -1,0 +1,10 @@
+# Generated / managed by other tools
+node_modules
+.wrangler
+worker-configuration.d.ts
+pnpm-lock.yaml
+bun.lock
+bun.lockb
+
+# Caches
+*.tsbuildinfo

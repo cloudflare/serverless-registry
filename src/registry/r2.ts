@@ -268,14 +268,14 @@ export class R2Registry implements Registry {
       limit: limit ?? 1000,
       startAfter: last ?? undefined,
     };
-    const repositories: Record<string, {}> = {};
+    const repositories = new Set<string>();
     let totalRecords = 0;
     let lastSeen: string | undefined;
     const objectExistsInPath = (entry?: string) => {
       if (entry === undefined) return false;
       const parts = entry.split("/");
       const repository = parts.slice(0, parts.length - 2).join("/");
-      return repository in repositories;
+      return repositories.has(repository);
     };
 
     const repositoriesOrder: string[] = [];
@@ -297,9 +297,9 @@ export class R2Registry implements Registry {
       }
       const repository = parts.slice(0, parts.length - 2).join("/");
 
-      if (repository in repositories) return;
+      if (repositories.has(repository)) return;
       totalRecords++;
-      repositories[repository] = {};
+      repositories.add(repository);
       repositoriesOrder.push(repository);
     };
 
@@ -468,7 +468,7 @@ export class R2Registry implements Registry {
   async putManifest(
     namespace: string,
     reference: string,
-    readableStream: ReadableStream<any>,
+    readableStream: ReadableStream,
     {
       contentType,
       checkLayers,
@@ -495,7 +495,7 @@ export class R2Registry implements Registry {
   async putManifestInner(
     name: string,
     reference: string,
-    readableStream: ReadableStream<any>,
+    readableStream: ReadableStream,
     contentType: string,
     checkLayers: boolean,
   ): Promise<PutManifestResponse | RegistryError> {
@@ -771,7 +771,7 @@ export class R2Registry implements Registry {
     namespace: string,
     uploadId: string,
     location: string,
-    stream: ReadableStream<any>,
+    stream: ReadableStream,
     length?: number | undefined,
     range?: [number, number] | undefined,
   ): Promise<RegistryError | UploadObject> {
@@ -953,7 +953,7 @@ export class R2Registry implements Registry {
     uploadId: string,
     location: string,
     expectedSha: string,
-    stream?: ReadableStream<any> | undefined,
+    stream?: ReadableStream | undefined,
     length?: number | undefined,
   ): Promise<RegistryError | FinishedUploadObject> {
     const urlObject = new URL("https://r2-registry.com" + location);

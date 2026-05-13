@@ -31,7 +31,7 @@ const router = Router();
 /**
  * V2 Api
  */
-router.all("/v2/*", v2Router.handle);
+router.all("/v2/*", v2Router.fetch);
 
 router.all("*", () => new Response("Not Found.", { status: 404 }));
 
@@ -55,7 +55,7 @@ export default {
     env.REGISTRY_CLIENT = new R2Registry(env);
     try {
       // Dispatch the request to the appropriate route
-      const res = await router.handle(request, env, context);
+      const res = await router.fetch(request, env, context);
       return res;
     } catch (err) {
       if (err instanceof Response) {

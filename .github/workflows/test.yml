@@ -4,27 +4,28 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
-          version: 9.9.0
+          version: 11
       - name: Use Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24
           cache: "pnpm"
 
-      - run: pnpm install --frozen-lockfile --child-concurrency=10
-      - run: cp wrangler.toml.example wrangler.toml
+      - run: pnpm install
       - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run format:check
       - run: pnpm test

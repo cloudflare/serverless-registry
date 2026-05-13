@@ -14,8 +14,8 @@ const platformSchema = z.object({
 const descriptorSchema = z.object({
   mediaType: z.string(),
   digest: z.string(),
-  size: z.number().int(),
-  annotations: z.record(z.string()).optional(),
+  size: z.int(),
+  annotations: z.record(z.string(), z.string()).optional(),
   artifactType: z.string().optional(),
   urls: z.array(z.string()).optional(),
   data: z.string().optional(),
@@ -34,7 +34,7 @@ export const manifestSchema = z
     mediaType: z.string(),
     config: descriptorSchema,
     layers: z.array(descriptorSchema),
-    annotations: z.record(z.string()).optional(),
+    annotations: z.record(z.string(), z.string()).optional(),
     subject: descriptorSchema.optional(),
   })
   .or(
@@ -48,7 +48,7 @@ export const manifestSchema = z
         history: z.array(z.unknown()).optional(),
         signatures: z.array(z.unknown()).optional(),
       })
-      .and(z.record(z.unknown())),
+      .and(z.record(z.string(), z.unknown())),
   )
   .or(
     z
@@ -56,7 +56,7 @@ export const manifestSchema = z
         schemaVersion: z.literal(2),
         artifactType: z.string().optional(),
         mediaType: z.string(),
-        annotations: z.record(z.string()).optional(),
+        annotations: z.record(z.string(), z.string()).optional(),
         subject: descriptorSchema.optional(),
         manifests: z.array(indexDescriptorSchema),
       })
@@ -71,7 +71,7 @@ export const manifestSchema = z
           }
 
           ctx.addIssue({
-            code: z.ZodIssueCode.custom,
+            code: "custom",
             path: ["manifests", index, "platform"],
             message: "platform is required for docker manifest lists",
           });

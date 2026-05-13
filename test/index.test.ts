@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { SHA256_PREFIX_LEN, getSHA256 } from "../src/user";
 import { TagsList } from "../src/router";
 import { Env } from "..";
@@ -11,7 +11,12 @@ import { encode } from "@cfworker/base64url";
 import { ManifestSchema } from "../src/manifest";
 import { limit } from "../src/chunk";
 import worker from "../index";
-import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { createExecutionContext, reset, waitOnExecutionContext } from "cloudflare:test";
+
+afterEach(async () => {
+  await reset();
+});
 
 type ReferrersIndex = {
   schemaVersion: 2;
@@ -1294,20 +1299,20 @@ test("registries configuration", async () => {
     {
       configuration: "{}",
       expected: [],
-      error: "Error parsing registries JSON: zod error: - invalid_type: Expected array, received object: ",
+      error: "Error parsing registries JSON: zod error:\n✖ Invalid input: expected array, received object",
       partialError: false,
     },
     {
       configuration: "[{}]",
       expected: [],
-      error: "Error parsing registries JSON: zod error: - invalid_type: Required: 0,registry",
-      partialError: false,
+      error: "✖ Invalid input: expected string, received undefined\n  → at [0].registry",
+      partialError: true,
     },
     {
       configuration: `[{ "registry": "no-url/hello-world" }]`,
       expected: [],
-      error: "Error parsing registries JSON: zod error: - invalid_string: Invalid url: 0,registry",
-      partialError: false,
+      error: "✖ Invalid URL\n  → at [0].registry",
+      partialError: true,
     },
     {
       configuration: "bla bla bla no json",
@@ -1396,11 +1401,6 @@ test("registries configuration", async () => {
 describe("http client", () => {
   const bindings = env as Env;
   let envBindings = { ...bindings };
-  const prevFetch = global.fetch;
-
-  afterAll(() => {
-    global.fetch = prevFetch;
-  });
 
   test("test manifest exists", async () => {
     envBindings = { ...bindings };
@@ -1408,9 +1408,9 @@ describe("http client", () => {
     envBindings.PASSWORD = "world";
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       return fetch(new Request(input as string | URL | Request, init));
-    }) as typeof global.fetch;
+    });
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
@@ -1432,9 +1432,9 @@ describe("http client", () => {
     envBindings.READONLY_PASSWORD = "world";
     envBindings.READONLY_USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       return fetch(new Request(input as string | URL | Request, init));
-    }) as typeof global.fetch;
+    });
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
@@ -1479,7 +1479,7 @@ describe("http client", () => {
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
     let referrersRequests = 0;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input as string | URL | Request, init);
       const url = new URL(request.url);
       if (url.pathname === "/v2/" || url.pathname === "/v2") {
@@ -1529,7 +1529,7 @@ describe("http client", () => {
           },
         },
       );
-    }) as typeof global.fetch;
+    });
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
       password_env: "PASSWORD",
@@ -1582,7 +1582,7 @@ describe("http client", () => {
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
     let referrersRequests = 0;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input as string | URL | Request, init);
       const url = new URL(request.url);
       if (url.pathname === "/v2/" || url.pathname === "/v2") {
@@ -1626,7 +1626,7 @@ describe("http client", () => {
           },
         },
       );
-    }) as typeof global.fetch;
+    });
 
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
@@ -1665,7 +1665,7 @@ describe("http client", () => {
     envBindings.PASSWORD = "world";
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input as string | URL | Request, init);
       const url = new URL(request.url);
       if (url.pathname === "/v2/" || url.pathname === "/v2") {
@@ -1690,7 +1690,7 @@ describe("http client", () => {
         value: `https://localhost/v2/${name}/referrers/${subjectDigest}`,
       });
       return response;
-    }) as typeof global.fetch;
+    });
 
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
@@ -1723,7 +1723,7 @@ describe("http client", () => {
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
     let referrersRequests = 0;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input as string | URL | Request, init);
       const url = new URL(request.url);
       if (url.pathname === "/v2/" || url.pathname === "/v2") {
@@ -1758,7 +1758,7 @@ describe("http client", () => {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
-    }) as typeof global.fetch;
+    });
 
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",
@@ -1793,7 +1793,7 @@ describe("http client", () => {
     envBindings.PASSWORD = "world";
     envBindings.USERNAME = "hello";
     envBindings.REGISTRIES_JSON = undefined;
-    global.fetch = (async (input: Parameters<typeof global.fetch>[0], init?: Parameters<typeof global.fetch>[1]) => {
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input as string | URL | Request, init);
       const url = new URL(request.url);
       if (url.pathname === "/v2/" || url.pathname === "/v2") {
@@ -1818,7 +1818,7 @@ describe("http client", () => {
         value: `https://localhost/v2/${name}/referrers/${subjectDigest}`,
       });
       return response;
-    }) as typeof global.fetch;
+    });
 
     const client = new RegistryHTTPClient(envBindings, {
       registry: "https://localhost",

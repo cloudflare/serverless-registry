@@ -7,9 +7,11 @@ import {
   Authenticator,
 } from "./auth";
 
-export function importKeyFromBase64(key: string): JsonWebKey {
+export function importKeyFromBase64(key: string): JsonWebKeyWithKid {
   // Decodes the base64 value and performs unicode normalization.
-  return JSON.parse(decode(key));
+  // The library's `JsonWebKeyWithKid` type requires `kid`, but ES256/HS256 sign
+  // and verify only need the key material at runtime, so casting is safe.
+  return JSON.parse(decode(key)) as JsonWebKeyWithKid;
 }
 
 export async function newRegistryTokens(jwtPublicKey: string): Promise<RegistryTokens> {
@@ -17,10 +19,10 @@ export async function newRegistryTokens(jwtPublicKey: string): Promise<RegistryT
 }
 
 export class RegistryTokens implements Authenticator {
-  private jwtPublicKey: JsonWebKey;
+  private jwtPublicKey: JsonWebKeyWithKid;
   authmode: string;
 
-  constructor(jwtPublicKey: JsonWebKey) {
+  constructor(jwtPublicKey: JsonWebKeyWithKid) {
     this.authmode = "RegistryTokens";
     this.jwtPublicKey = jwtPublicKey;
   }

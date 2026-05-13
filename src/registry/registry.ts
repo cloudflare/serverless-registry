@@ -7,7 +7,7 @@ import { GarbageCollectionMode } from "./garbage-collector";
 // Defines a registry and how it's configured
 const registryConfiguration = z
   .object({
-    registry: z.string().url(),
+    registry: z.url(),
   })
   .and(
     z
@@ -17,8 +17,8 @@ const registryConfiguration = z
       })
       .or(
         z.object({
-          username: z.undefined(),
-          password: z.undefined(),
+          username: z.undefined().optional(),
+          password: z.undefined().optional(),
         }),
       ),
   );
@@ -167,7 +167,7 @@ export interface Registry {
   putManifest(
     namespace: string,
     reference: string,
-    readableStream: ReadableStream<any>,
+    readableStream: ReadableStream,
     options: {
       contentType: string;
       checkLayers?: boolean;

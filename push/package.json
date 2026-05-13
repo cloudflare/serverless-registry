@@ -2,16 +2,14 @@
   "name": "push",
   "module": "index.ts",
   "type": "module",
+  "private": true,
   "devDependencies": {
-    "@types/tar-fs": "^2.0.4",
-    "bun-types": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+    "@types/bun": "^1.3.14",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
-    "p-limit": "^6.1.0",
-    "tar": "^7.4.3"
+    "p-limit": "^7.3.0",
+    "tar": "^7.5.15"
   }
 }

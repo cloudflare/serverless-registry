@@ -71,7 +71,7 @@ if (!(await file(tarFile).exists())) {
 
   await mkdir(imagePath);
 
-  const result = await extract({
+  await extract({
     file: tarFile,
     cwd: imagePath,
   });
@@ -113,13 +113,13 @@ console.log("Compressing...");
 for (const layer of manifest.Layers) {
   tasks.push(
     pool(async () => {
-      let layerPath = path.join(imagePath, layer);
+      const layerPath = path.join(imagePath, layer);
       // docker likes to put stuff in two ways:
       //   1. blobs/sha256/<layer>
       //   2. <layer>/layer.tar
       //
       // This handles both cases.
-      let layerName = layer.endsWith(".tar") ? path.dirname(layer) : path.basename(layer);
+      const layerName = layer.endsWith(".tar") ? path.dirname(layer) : path.basename(layer);
 
       const layerCachePath = path.join(cacheFolder, layerName + "-ptr");
       {
@@ -149,8 +149,8 @@ for (const layer of manifest.Layers) {
         .stream()
         .pipeTo(
           new WritableStream({
-            write(value: Buffer) {
-              return new Promise(async (res) => {
+            write(value: Uint8Array) {
+              return new Promise<void>((res) => {
                 const needsWriteBackoff = gzipStream.write(value);
                 // We need to back-off with the writes
                 if (!needsWriteBackoff) {
@@ -167,13 +167,11 @@ for (const layer of manifest.Layers) {
                 res();
               });
             },
-            close() {
-              return new Promise(async (res) => {
-                // Flush before end
-                await new Promise((resFlush) => gzipStream.flush(() => resFlush(true)));
-                // End the stream
-                gzipStream.end(res);
-              });
+            async close() {
+              // Flush before end
+              await new Promise((resFlush) => gzipStream.flush(() => resFlush(true)));
+              // End the stream
+              await new Promise<void>((res) => gzipStream.end(res));
             },
           }),
         );

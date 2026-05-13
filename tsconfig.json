@@ -1,5 +1,27 @@
 {
-  "extends": "./tsconfig.base.json",
-  "include": ["src/**/*.ts", "index.ts", "test/index.test.ts"],
-  "exclude": ["src/**/*.js", "dist/**/*.ts", "test/vitest.config.ts"]
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext"],
+    "experimentalDecorators": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["./worker-configuration.d.ts", "node"],
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noImplicitOverride": true
+  },
+  "include": ["src/**/*.ts", "*.ts"],
+  "exclude": ["src/**/*.js", "dist/**/*.ts"]
 }
