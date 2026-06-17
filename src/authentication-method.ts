@@ -8,7 +8,7 @@ export async function authenticationMethodFromEnv(env: Env) {
     return await newRegistryTokens(env.JWT_REGISTRY_TOKENS_PUBLIC_KEY);
   } else if (env.USERNAME && env.PASSWORD) {
     const credentials: AuthenticatorCredentials[] = [
-      { username: env.USERNAME, password: env.PASSWORD, capabilities: ["pull", "push"] }
+      { username: env.USERNAME, password: env.PASSWORD, capabilities: ["pull", "push", "delete"] }
     ];
 
     if (env.READONLY_USERNAME && env.READONLY_PASSWORD) {

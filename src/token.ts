@@ -78,6 +78,10 @@ export class RegistryTokens implements Authenticator {
     return request.url.endsWith("/v2/");
   }
 
+  static checkIfGarbageCollectionPath(request: Request): boolean {
+    return new URL(request.url).pathname.endsWith("/gc");
+  }
+
   async verifyToken(
     request: Request,
     token: string,
@@ -165,6 +169,29 @@ export class RegistryTokens implements Authenticator {
 
       // PUSH methods
       case "POST":
+        // garbage collection is a destructive operation, it requires the "delete" capability
+        if (RegistryTokens.checkIfGarbageCollectionPath(request)) {
+          if (!payload.capabilities.includes("delete")) {
+            console.warn(
+              `verifyToken: failed jwt verification: missing "delete" capability for ${request.method} HTTP method in ${request.url}`,
+            );
+            return { verified: false, payload: null };
+          }
+        } else if (!payload.capabilities.includes("push")) {
+          console.warn(
+            `verifyToken: failed jwt verification: missing "push" capability for ${request.method} HTTP method`,
+          );
+          return { verified: false, payload: null };
+        }
+        if (!checkHasPermissionToImage(payload, request)) {
+          console.warn(
+            `verifyToken: failed jwt verification: image name ${payload?.imageName} does not match the token's image name in ${request.url}`,
+          );
+          return { verified: false, payload: null };
+        }
+        break;
+      case "PUT":
+      case "PATCH":
         if (!payload.capabilities.includes("push")) {
           console.warn(
             `verifyToken: failed jwt verification: missing "push" capability for ${request.method} HTTP method`,
@@ -177,12 +204,18 @@ export class RegistryTokens implements Authenticator {
           );
           return { verified: false, payload: null };
         }
-      case "PUT":
+        break;
+      // DELETE is a destructive operation, it requires an explicit "delete" capability
       case "DELETE":
-      case "PATCH":
-        if (!payload.capabilities.includes("push")) {
+        if (!payload.capabilities.includes("delete")) {
           console.warn(
-            `verifyToken: failed jwt verification: missing "push" capability for ${request.method} HTTP method`,
+            `verifyToken: failed jwt verification: missing "delete" capability for ${request.method} HTTP method in ${request.url}`,
+          );
+          return { verified: false, payload: null };
+        }
+        if (!checkHasPermissionToImage(payload, request)) {
+          console.warn(
+            `verifyToken: failed jwt verification: image name ${payload?.imageName} does not match the token's image name in ${request.url}`,
           );
           return { verified: false, payload: null };
         }

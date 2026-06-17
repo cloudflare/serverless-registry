@@ -1,7 +1,7 @@
 import { decode } from "@cfworker/base64url";
 import { errorString } from "./utils";
 
-export type RegistryTokenCapability = "push" | "pull";
+export type RegistryTokenCapability = "push" | "pull" | "delete";
 export type RegistryAuthProtocolTokenPayload = {
   username: string;
   account_id?: string;

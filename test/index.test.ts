@@ -348,13 +348,55 @@ describe("tokens", async () => {
     expect(verified).toBeTruthy();
   });
 
-  test("auth payload push on /v2/whatever with mutations", async () => {
-    for (const mutationMethod of ["PATCH", "POST", "DELETE"]) {
+  test("auth payload push on /v2/whatever with push mutations", async () => {
+    for (const mutationMethod of ["PATCH", "POST"]) {
       const { verified } = RegistryTokens.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
         capabilities: ["push"],
       } as RegistryAuthProtocolTokenPayload);
       expect(verified).toBeTruthy();
     }
+  });
+
+  test("auth payload push without delete cannot DELETE", async () => {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("DELETE", "/v2/whatever/manifests/sha256:abc", null), {
+      capabilities: ["push"],
+    } as RegistryAuthProtocolTokenPayload);
+    expect(verified).toBeFalsy();
+  });
+
+  test("auth payload push without delete cannot run gc", async () => {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("POST", "/v2/whatever/gc", null), {
+      capabilities: ["push"],
+    } as RegistryAuthProtocolTokenPayload);
+    expect(verified).toBeFalsy();
+  });
+
+  test("auth payload delete can DELETE and run gc", async () => {
+    const del = RegistryTokens.verifyPayload(createRequest("DELETE", "/v2/whatever/manifests/sha256:abc", null), {
+      capabilities: ["delete"],
+    } as RegistryAuthProtocolTokenPayload);
+    expect(del.verified).toBeTruthy();
+
+    const gc = RegistryTokens.verifyPayload(createRequest("POST", "/v2/whatever/gc", null), {
+      capabilities: ["delete"],
+    } as RegistryAuthProtocolTokenPayload);
+    expect(gc.verified).toBeTruthy();
+  });
+
+  test("auth payload delete scoped to another image cannot DELETE", async () => {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("DELETE", "/v2/whatever/manifests/sha256:abc", null), {
+      capabilities: ["delete"],
+      imageName: "someotherimage",
+    } as RegistryAuthProtocolTokenPayload);
+    expect(verified).toBeFalsy();
+  });
+
+  test("auth payload delete scoped to the same image can DELETE", async () => {
+    const { verified } = RegistryTokens.verifyPayload(createRequest("DELETE", "/v2/whatever/manifests/sha256:abc", null), {
+      capabilities: ["delete"],
+      imageName: "whatever",
+    } as RegistryAuthProtocolTokenPayload);
+    expect(verified).toBeTruthy();
   });
 
   test("auth payload pull on /v2/whatever with mutations", async () => {
@@ -366,8 +408,8 @@ describe("tokens", async () => {
     }
   });
 
-  test("auth payload push/pull on /v2/whatever with mutations", async () => {
-    for (const mutationMethod of ["PATCH", "POST", "DELETE"]) {
+  test("auth payload push/pull on /v2/whatever with push mutations", async () => {
+    for (const mutationMethod of ["PATCH", "POST"]) {
       const { verified } = RegistryTokens.verifyPayload(createRequest(mutationMethod, "/v2/whatever", null), {
         capabilities: ["pull", "push"],
       } as RegistryAuthProtocolTokenPayload);
