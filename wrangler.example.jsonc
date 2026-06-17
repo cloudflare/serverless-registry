@@ -1,0 +1,40 @@
+{
+  "name": "r2-registry",
+
+  // Custom Cloudflare domain for worker:
+  // "routes": [
+  //   { "pattern": "your.custom.domain", "custom_domain": true }
+  // ],
+
+  // set to false to disable the default Worker domain (applicable only if custom domain is used instead)
+  "workers_dev": true,
+  "main": "./index.ts",
+  "compatibility_date": "2024-09-09",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "env": {
+    // Production
+    "production": {
+      "r2_buckets": [{ "binding": "REGISTRY", "bucket_name": "" }],
+      "vars": {
+        "JWT_REGISTRY_TOKENS_PUBLIC_KEY": "",
+      },
+      // Secrets:
+      // USERNAME/PASSWORD/READONLY_USERNAME/READONLY_PASSWORD if you want username/password based auth
+    },
+
+    // Dev - For local dev using `npx wrangler dev`
+    "dev": {
+      "r2_buckets": [{ "binding": "REGISTRY", "bucket_name": "r2-image-registry-dev" }],
+      "vars": {
+        // "REGISTRIES_JSON": "[{ \"registry\": \"http://localhost:9999\", \"password_env\": \"PASSWORD\", \"username\": \"hello\" }]",
+        "USERNAME": "hello",
+        "PASSWORD": "world",
+        // "READONLY_USERNAME": "readonly",
+        // "READONLY_PASSWORD": "readonly"
+        // The necessary secrets are:
+        // Setup those secrets on .dev.vars in the root of the project
+      },
+    },
+  },
+}

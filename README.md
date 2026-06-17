@@ -13,12 +13,18 @@ You have to install all the dependencies with [pnpm](https://pnpm.io/installatio
 $ pnpm install
 ```
 
-After installation, there is a few steps to actually deploy the registry into production:
+After installation, there are a few steps to actually deploy the registry into production:
 
-1. Have your own `wrangler` file.
+1. Create your own wrangler config file based on the example files in this repo.
+
+Cloudflare recommends [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/) for new projects, but `wrangler.toml` is also supported. Pick whichever you prefer:
 
 ```bash
-$ cp wrangler.toml.example wrangler.toml
+# JSONC (recommended)
+$ cp wrangler.example.jsonc wrangler.jsonc
+
+# or TOML
+$ cp wrangler.example.toml wrangler.toml
 ```
 
 2. Setup the R2 Bucket for this registry
@@ -27,11 +33,19 @@ $ cp wrangler.toml.example wrangler.toml
 $ npx wrangler --env production r2 bucket create r2-registry
 ```
 
-Add this to your `wrangler.toml`
+Add this to your wrangler config file:
 
+```jsonc
+// wrangler.jsonc
+"r2_buckets": [
+  { "binding": "REGISTRY", "bucket_name": "r2-registry" }
+]
 ```
+
+```toml
+# wrangler.toml
 r2_buckets = [
-    { binding = "REGISTRY", bucket_name = "r2-registry"}
+  { binding = "REGISTRY", bucket_name = "r2-registry" }
 ]
 ```
 
@@ -83,9 +97,21 @@ This is very useful for migrating from one registry to `serverless-registry`.
 It supports both Basic and Bearer authentications as explained in the
 [registry spec](https://distribution.github.io/distribution/spec/auth/token/).
 
-In the wrangler.toml file:
+In your wrangler config file:
 
+```jsonc
+// wrangler.jsonc
+"env": {
+  "production": {
+    "vars": {
+      "REGISTRIES_JSON": "[{ \"registry\": \"https://url-to-other-registry\", \"password_env\": \"REGISTRY_TOKEN\", \"username\": \"username-to-use\" }]"
+    }
+  }
+}
 ```
+
+```toml
+# wrangler.toml
 [env.production.vars]
 REGISTRIES_JSON = "[{ \"registry\": \"https://url-to-other-registry\", \"password_env\": \"REGISTRY_TOKEN\", \"username\": \"username-to-use\" }]"
 ```
@@ -108,11 +134,17 @@ echo $GITHUB_TOKEN | npx wrangler secret put REGISTRY_TOKEN --env production
 The trick is always looking for how you would login in Docker for
 the target registry and setup the credentials.
 
-**Never put a registry password/token inside the wrangler.toml, please always use `wrangler secrets put`**
+**Never put a registry password/token inside your wrangler config file, please always use `wrangler secrets put`**
 
 You can also use docker.io with anonymous authentication:
 
+```jsonc
+// wrangler.jsonc
+"REGISTRIES_JSON": "[{ \"registry\": \"https://index.docker.io/\" }]"
 ```
+
+```toml
+# wrangler.toml
 REGISTRIES_JSON = "[{ \"registry\": \"https://index.docker.io/\" }]"
 ```
 

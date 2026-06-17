@@ -7,7 +7,7 @@
   "scripts": {
     "deploy": "wrangler deploy --minify --env production",
     "dev:miniflare": "wrangler dev --env dev --port 9999 --live-reload",
-    "generate-types": "wrangler types --config test/wrangler.test.toml --include-env=false",
+    "generate-types": "wrangler types --config test/wrangler.test.jsonc --include-env=false",
     "typecheck": "pnpm run generate-types && tsc --noEmit && tsc --noEmit --project test/tsconfig.json && tsc --noEmit --project push/tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
