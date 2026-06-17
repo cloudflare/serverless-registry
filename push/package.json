@@ -10,6 +10,6 @@
   "dependencies": {
     "node-fetch": "^3.3.2",
     "p-limit": "^7.3.0",
-    "tar": "^7.5.15"
+    "tar": "^7.5.16"
   }
 }
