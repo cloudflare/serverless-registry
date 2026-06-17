@@ -20,7 +20,7 @@ Note: If you are running Docker desktop in MacOS/Windows, you should add the fol
 }
 ```
 
-By default in a local environment, the registry uses USERNAME=hello and PASSWORD=world. See `wrangler.toml` for more details.
+By default in a local environment, the registry uses `USERNAME=hello` and `PASSWORD=world`. See the example wrangler config files for more details.
 
 Tag any image that you have locally and push it:
 
