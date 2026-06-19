@@ -1,0 +1,33 @@
+# Binaries
+docker-push
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Cache directories
+.cache/
+.output-image/
+
+# Docker image tars
+*.tar
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+oci-images
+oci-images1
+oci-images2
+oci-images3
+.output-image
+.cache
+push-pytorch.log
