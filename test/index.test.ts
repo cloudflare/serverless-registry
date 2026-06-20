@@ -2380,3 +2380,96 @@ test("docker.io", () => {
     }
   }
 });
+
+// Multi-chunk uploads (a PATCH chunk followed by a chunk in the finalizing PUT) exercise the
+// small-chunk reconstruction path, which the registry only performs under full push-compatibility
+// mode (PUSH_COMPATIBILITY_MODE=full); these finalize tests enable that mode.
+async function fetchFullCompat(r: Request): Promise<Response> {
+  r.headers.append("Authorization", usernamePasswordToAuth(username, "world"));
+  const ctx = createExecutionContext();
+  const res = await worker.fetch(r, { ...env, PUSH_COMPATIBILITY_MODE: "full" } as Env, ctx);
+  await waitOnExecutionContext(ctx);
+  return res as Response;
+}
+
+describe("blob upload finalization error handling", () => {
+  test("PUT finalize with a wrong digest is rejected 400 DIGEST_INVALID (not 500)", async () => {
+    const name = "uploaderr/baddigest";
+    const data = "the-real-content";
+    const post = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    const patch = await fetch(
+      createRequest("PATCH", post.headers.get("location")!, limit(new Blob([data]).stream(), data.length), {}),
+    );
+    expect(patch.status).toBe(202);
+    const wrongDigest = "sha256:" + "0".repeat(64);
+    const put = await fetch(createRequest("PUT", patch.headers.get("location")! + "&digest=" + wrongDigest, null, {}));
+    expect(put.status).toBe(400);
+    // Assert the mapped body, which guards the coupling to R2's checksum-mismatch wording: if the
+    // runtime changes that text, putBlob would fall through to 500 and this assertion would fail.
+    const body = (await put.json()) as { errors: { code: string }[] };
+    expect(body.errors[0].code).toBe("DIGEST_INVALID");
+  });
+
+  test("PUT finalize with an out-of-order final chunk is rejected 416", async () => {
+    const name = "uploaderr/outoforder";
+    const first = "0123456789"; // 10 bytes staged at 0-9
+    const post = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    const patch = await fetch(
+      createRequest("PATCH", post.headers.get("location")!, limit(new Blob([first]).stream(), first.length), {
+        "Content-Range": "0-9",
+      }),
+    );
+    expect(patch.status).toBe(202);
+    // A final chunk whose range does not continue at byte 10 is out of order.
+    const finalData = "abcdefghij";
+    const digest = await getSHA256(first + finalData);
+    const put = await fetch(
+      createRequest(
+        "PUT",
+        patch.headers.get("location")! + "&digest=" + digest,
+        limit(new Blob([finalData]).stream(), finalData.length),
+        { "Content-Range": "50-59", "Content-Length": `${finalData.length}` },
+      ),
+    );
+    expect(put.status).toBe(416);
+  });
+
+  test("PUT finalize carrying the final chunk assembles the blob (201) and round-trips", async () => {
+    const name = "uploaderr/finalchunk";
+    const first = "first-part-bytes";
+    const finalData = "final-chunk-bytes";
+    const full = first + finalData;
+    const digest = await getSHA256(full);
+    const post = await fetchFullCompat(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    const patch = await fetchFullCompat(
+      createRequest("PATCH", post.headers.get("location")!, limit(new Blob([first]).stream(), first.length), {
+        "Content-Range": `0-${first.length - 1}`,
+      }),
+    );
+    expect(patch.status).toBe(202);
+    const put = await fetchFullCompat(
+      createRequest(
+        "PUT",
+        patch.headers.get("location")! + "&digest=" + digest,
+        limit(new Blob([finalData]).stream(), finalData.length),
+        { "Content-Range": `${first.length}-${full.length - 1}`, "Content-Length": `${finalData.length}` },
+      ),
+    );
+    expect(put.status).toBe(201);
+    // The PUT-carried final chunk must actually be stored (previously it was silently dropped).
+    const get = await fetchFullCompat(createRequest("GET", `/v2/${name}/blobs/${digest}`, null));
+    expect(get.status).toBe(200);
+    expect(await get.text()).toEqual(full);
+  });
+
+  test("PUT finalize of an empty (zero-byte) blob succeeds 201", async () => {
+    const name = "uploaderr/empty";
+    const emptyDigest = await getSHA256("");
+    const post = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    const put = await fetch(createRequest("PUT", post.headers.get("location")! + "&digest=" + emptyDigest, null, {}));
+    expect(put.status).toBe(201);
+    const get = await fetch(createRequest("GET", `/v2/${name}/blobs/${emptyDigest}`, null));
+    expect(get.status).toBe(200);
+    expect(await get.text()).toEqual("");
+  });
+});

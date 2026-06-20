@@ -11,8 +11,8 @@ import {
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
 import { SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
-import { readableToBlob, readerToBlob, wrap } from "../utils";
-import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
+import { errorString, jsonHeaders, readableToBlob, readerToBlob, wrap } from "../utils";
+import { BlobUnknownError, DigestInvalidError, ManifestUnknownError } from "../v2-errors";
 import {
   CheckLayerResponse,
   CheckManifestResponse,
@@ -975,14 +975,36 @@ export class R2Registry implements Registry {
     const state = hashedState.state;
 
     const uuid = state.registryUploadId;
-    if (state.parts.length === 0) {
-      if (!stream) {
-        console.error("There has been an upload with zero parts and the body is null");
+
+    // Commit the finished content under the client-claimed digest. R2 verifies the sha256 we
+    // hand it against the bytes it stored, so a digest the client got wrong surfaces here as a
+    // checksum-mismatch rejection — translate that into a 400 DIGEST_INVALID rather than letting
+    // it bubble up as an opaque 500. Any other failure is a genuine server error.
+    const putBlob = async (body: ReadableStream | Uint8Array | null): Promise<RegistryError | null> => {
+      const [, err] = await wrap(
+        this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, body, {
+          sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
+        }),
+      );
+      if (err === null) return null;
+      const message = errorString(err);
+      // Matches the wording R2 uses when the stored bytes don't hash to the requested sha256.
+      // This couples to the runtime's error text; the unit test asserts the 400 body so a future
+      // wording change surfaces as a test failure rather than a silent regression to 500.
+      if (/checksum|did not match/i.test(message)) {
         return {
-          response: new InternalError(),
+          response: new Response(JSON.stringify(DigestInvalidError()), { status: 400, headers: jsonHeaders() }),
         };
       }
+      console.error("finishUpload put failed:", message);
+      return { response: new InternalError() };
+    };
 
+    if (state.parts.length === 0) {
+      // No multipart parts were staged: the whole blob arrives in this request body (a monolithic
+      // PUT), or it is a zero-byte blob. An absent body is a valid empty blob — store empty bytes
+      // (R2 requires a known-length body, so a length-less empty stream cannot be used here) and
+      // let the checksum check confirm the client really claimed the empty digest.
       if (length && length > MAXIMUM_CHUNK) {
         console.error("Surpasses MAXIMUM_CHUNK");
         return {
@@ -990,20 +1012,19 @@ export class R2Registry implements Registry {
         };
       }
 
-      await this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, stream, {
-        sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
-      });
+      // With bytes to store, the request body carries its own (known) length. With none, it is a
+      // zero-byte blob — hand R2 empty bytes rather than a length-less empty stream, which it rejects.
+      const putErr = await putBlob(length && length > 0 ? stream! : new Uint8Array(0));
+      if (putErr) return putErr;
     } else {
       const upload = this.env.REGISTRY.resumeMultipartUpload(uuid, state.uploadId);
-      // TODO: Handle one last buffer here
+      // A final chunk carried by the finalizing PUT is appended beforehand via uploadChunk (the
+      // same path a PATCH uses), so the staged parts are complete here. See the PUT handler.
       await upload.complete(state.parts);
       const obj = await this.env.REGISTRY.get(uuid);
-      const put = this.env.REGISTRY.put(`${namespace}/blobs/${expectedSha}`, obj!.body, {
-        sha256: (expectedSha as string).slice(SHA256_PREFIX_LEN),
-      });
-
-      await put;
+      const putErr = await putBlob(obj!.body);
       await this.env.REGISTRY.delete(uuid);
+      if (putErr) return putErr;
     }
 
     await this.env.REGISTRY.delete(getRegistryUploadsPath(state));
