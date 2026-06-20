@@ -509,6 +509,17 @@ export class R2Registry implements Registry {
     shaWriter.close();
     const digest = await sha256.digest;
     const digestStr = hexToDigest(digest);
+
+    // A reference containing ":" addresses the manifest by digest (an OCI tag never contains ":").
+    // The submitted content must hash to exactly that digest; a mismatched or malformed digest
+    // reference is a client error (400 DIGEST_INVALID), not a tag to store under the wrong key.
+    if (reference.includes(":") && reference !== digestStr) {
+      const message = isValidDigest(reference)
+        ? `provided digest ${reference} does not match content digest ${digestStr}`
+        : `invalid digest reference ${reference}`;
+      return { response: new ManifestError("DIGEST_INVALID", message) };
+    }
+
     const text = await blob.text();
     let manifestJSON: unknown;
     try {
