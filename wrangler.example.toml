@@ -32,6 +32,8 @@ USERNAME = "hello"
 PASSWORD = "world"
 # READONLY_USERNAME = "readonly"
 # READONLY_PASSWORD = "readonly"
+# Set READONLY_ANONYMOUS to "true" to allow unauthenticated pulls (writes still require auth)
+# READONLY_ANONYMOUS = "true"
 # The necessary secrets are:
 # Setup those secrets on .dev.vars in the root of the project
 #
