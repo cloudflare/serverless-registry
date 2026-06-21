@@ -344,6 +344,7 @@ describe("v2 manifests", () => {
       "content-length": "2",
       "content-type": "application/gzip",
       "docker-content-digest": sha256,
+      "content-encoding": "identity",
     });
     await bindings.REGISTRY.delete(`${name}/manifests/${reference}`);
   });
@@ -2379,4 +2380,51 @@ test("docker.io", () => {
       throw new Error(`Expected ${testCase[1]} on ${testCase[0]} but got ${isDocker}`);
     }
   }
+});
+
+describe("blob and manifest GET/HEAD response headers", () => {
+  // These responses must carry a literal Content-Length (and the manifest its Content-Type), and
+  // set Content-Encoding: identity so the runtime does not switch to chunked transfer-encoding and
+  // drop Content-Length — the regression these tests guard.
+  test("blob GET and HEAD return Content-Length, Content-Encoding identity, and the exact bytes", async () => {
+    const name = "headers/blob";
+    const data = "blob-bytes-for-content-length";
+    const sha256 = await getSHA256(data);
+    const post = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    const patch = await fetch(
+      createRequest("PATCH", post.headers.get("location")!, limit(new Blob([data]).stream(), data.length), {}),
+    );
+    await fetch(createRequest("PUT", patch.headers.get("location")! + "&digest=" + sha256, null, {}));
+
+    const get = await fetch(createRequest("GET", `/v2/${name}/blobs/${sha256}`, null));
+    expect(get.status).toBe(200);
+    expect(get.headers.get("Content-Length")).toEqual(`${data.length}`);
+    expect(get.headers.get("Content-Encoding")).toEqual("identity");
+    expect(await get.text()).toEqual(data);
+
+    const head = await fetch(createRequest("HEAD", `/v2/${name}/blobs/${sha256}`, null));
+    expect(head.status).toBe(200);
+    expect(head.headers.get("Content-Length")).toEqual(`${data.length}`);
+    expect(head.headers.get("Content-Encoding")).toEqual("identity");
+  });
+
+  test("manifest GET and HEAD return Content-Length, Content-Type and Content-Encoding identity", async () => {
+    const name = "headers/manifest";
+    const manifest = await generateManifest(name);
+    const { sha256 } = await createManifest(name, manifest, "v1");
+    const size = new Blob([JSON.stringify(manifest)]).size;
+
+    // Manifests are stored (uploadManifest) with this content type; GET/HEAD must echo it exactly.
+    const get = await fetch(createRequest("GET", `/v2/${name}/manifests/v1`, null));
+    expect(get.status).toBe(200);
+    expect(get.headers.get("Content-Length")).toEqual(`${size}`);
+    expect(get.headers.get("Content-Type")).toEqual("application/gzip");
+    expect(get.headers.get("Content-Encoding")).toEqual("identity");
+
+    const head = await fetch(createRequest("HEAD", `/v2/${name}/manifests/${sha256}`, null));
+    expect(head.status).toBe(200);
+    expect(head.headers.get("Content-Length")).toEqual(`${size}`);
+    expect(head.headers.get("Content-Type")).toEqual("application/gzip");
+    expect(head.headers.get("Content-Encoding")).toEqual("identity");
+  });
 });

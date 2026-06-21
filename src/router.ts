@@ -27,6 +27,11 @@ function formatNextLink(url: URL): string {
   return `<${url.toString()}>; rel="next"`;
 }
 
+// Stops the runtime's automatic gzip, which switches the response to chunked transfer-encoding and
+// drops the Content-Length the distribution spec requires on blob/manifest GET and HEAD. Bodies are
+// served verbatim. Spread into each such response's headers.
+const identityEncoding = { "Content-Encoding": "identity" } as const;
+
 const v2Router = Router({ base: "/v2/" });
 
 v2Router.get("/", async (_req, _env: Env) => {
@@ -148,6 +153,7 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
         "Content-Length": res.size.toString(),
         "Content-Type": res.contentType,
         "Docker-Content-Digest": res.digest,
+        ...identityEncoding,
       },
     });
   }
@@ -207,6 +213,7 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
       "Content-Length": checkManifestResponse.size.toString(),
       "Content-Type": checkManifestResponse.contentType,
       "Docker-Content-Digest": checkManifestResponse.digest,
+      ...identityEncoding,
     },
   });
 });
@@ -220,6 +227,7 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
         "Content-Length": res.size.toString(),
         "Content-Type": res.contentType,
         "Docker-Content-Digest": res.digest,
+        ...identityEncoding,
       },
     });
   }
@@ -270,6 +278,7 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
       "Content-Length": getManifestResponse.size.toString(),
       "Content-Type": getManifestResponse.contentType,
       "Docker-Content-Digest": getManifestResponse.digest,
+      ...identityEncoding,
     },
   });
 });
@@ -366,6 +375,7 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
       headers: {
         "Docker-Content-Digest": res.digest,
         "Content-Length": `${res.size}`,
+        ...identityEncoding,
       },
     });
   }
@@ -404,6 +414,7 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
     headers: {
       "Docker-Content-Digest": layerResponse.digest,
       "Content-Length": `${layerResponse.size}`,
+      ...identityEncoding,
     },
   });
 });
@@ -625,6 +636,7 @@ v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
     headers: {
       "Content-Length": layerExistsResponse.size.toString(),
       "Docker-Content-Digest": layerExistsResponse.digest,
+      ...identityEncoding,
     },
   });
 });
