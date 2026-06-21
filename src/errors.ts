@@ -72,7 +72,13 @@ export class InternalError extends Response {
 
 export class ManifestError extends Response {
   constructor(
-    code: "MANIFEST_INVALID" | "BLOB_UNKNOWN" | "MANIFEST_UNVERIFIED" | "TAG_INVALID" | "NAME_INVALID",
+    code:
+      | "MANIFEST_INVALID"
+      | "BLOB_UNKNOWN"
+      | "MANIFEST_UNVERIFIED"
+      | "TAG_INVALID"
+      | "NAME_INVALID"
+      | "DIGEST_INVALID",
     message: string,
     detail: Record<string, string> = {},
   ) {
