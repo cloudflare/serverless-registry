@@ -558,15 +558,36 @@ v2Router.put("/:name+/blobs/uploads/:uuid", async (req, env: Env) => {
   const { digest } = req.query;
 
   const url = new URL(req.url);
+  let location = url.pathname + "?" + url.searchParams.toString();
+  const contentLength = +(req.headers.get("Content-Length") ?? "0");
+
+  // A finalizing PUT may carry the last chunk. Append it through the same path a PATCH uses, so
+  // small chunks are combined into a valid part and an out-of-order chunk is rejected with 416
+  // (instead of corrupting the assembled blob). finishUpload then completes the staged parts.
+  if (req.body && contentLength > 0) {
+    const contentRange = req.headers.get("Content-Range");
+    const [start, end] = contentRange?.split("-") ?? [undefined, undefined];
+    const [chunk, chunkErr] = await wrap<UploadObject | RegistryError, Error>(
+      env.REGISTRY_CLIENT.uploadChunk(
+        name,
+        uuid,
+        location,
+        req.body,
+        contentLength,
+        end !== undefined && start !== undefined ? [+start, +end] : undefined,
+      ),
+    );
+    if (chunkErr) {
+      return new InternalError();
+    }
+    if ("response" in chunk) {
+      return chunk.response;
+    }
+    location = chunk.location;
+  }
+
   const [res, err] = await wrap<FinishedUploadObject | RegistryError, Error>(
-    env.REGISTRY_CLIENT.finishUpload(
-      name,
-      uuid,
-      url.pathname + "?" + url.searchParams.toString(),
-      digest! as string,
-      req.body ?? undefined,
-      +(req.headers.get("Content-Length") ?? "0"),
-    ),
+    env.REGISTRY_CLIENT.finishUpload(name, uuid, location, digest! as string),
   );
 
   if (err) {
