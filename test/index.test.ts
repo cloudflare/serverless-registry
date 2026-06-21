@@ -2391,3 +2391,31 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("mounted blob HEAD reports source metadata", () => {
+  test("HEAD of a cross-repo mounted blob returns the source digest and size, not the symlink's", async () => {
+    const src = "mountsrc/repo";
+    const dst = "mountdst/repo";
+    const data = "cross-repo-mounted-layer-bytes";
+    const digest = await getSHA256(data);
+
+    // Push the blob into the source repo.
+    const post = await fetch(createRequest("POST", `/v2/${src}/blobs/uploads/`, null, {}));
+    const patch = await fetch(
+      createRequest("PATCH", post.headers.get("location")!, limit(new Blob([data]).stream(), data.length), {}),
+    );
+    const put = await fetch(createRequest("PUT", patch.headers.get("location")! + "&digest=" + digest, null, {}));
+    expect(put.ok).toBeTruthy();
+
+    // Cross-repo mount into the destination repo (stored as a symlink object).
+    const mount = await fetch(createRequest("POST", `/v2/${dst}/blobs/uploads/?from=${src}&mount=${digest}`, null, {}));
+    expect(mount.status).toBe(201);
+    expect(mount.headers.get("docker-content-digest")).toEqual(digest);
+
+    // HEAD the mounted blob: must report the source blob's size + digest, not the symlink object's.
+    const head = await fetch(createRequest("HEAD", `/v2/${dst}/blobs/${digest}`, null));
+    expect(head.status).toBe(200);
+    expect(head.headers.get("Content-Length")).toEqual(`${data.length}`);
+    expect(head.headers.get("Docker-Content-Digest")).toEqual(digest);
+  });
+});
