@@ -198,6 +198,8 @@ export async function encodeState(state: State, env: Env): Promise<{ jwt: string
 }
 
 export const symlinkHeader = "X-Serverless-Registry-Symlink";
+export const symlinkDigestHeader = "X-Serverless-Registry-Symlink-Digest";
+export const symlinkSizeHeader = "X-Serverless-Registry-Symlink-Size";
 
 export async function getUploadState(
   name: string,
@@ -650,11 +652,22 @@ export class R2Registry implements Registry {
       // Trying to mount a layer from sourceLayerPath to destinationLayerPath
 
       // Create linked file with custom metadata
+      if (res.checksums.sha256 === null) {
+        return { response: new ServerError("invalid checksum from R2 backend") };
+      }
       const [newFile, error] = await wrap(
         this.env.REGISTRY.put(destinationLayerPath, sourceLayerPath, {
+          // Symlink object content is the source blob path string.
+          // The object checksum must match the symlink payload to satisfy R2.
           sha256: await getSHA256(sourceLayerPath, ""),
           httpMetadata: res.httpMetadata,
-          customMetadata: { [symlinkHeader]: sourceName }, // Storing target repository name in metadata (to easily resolve recursive layer mounting)
+          customMetadata: {
+            // Storing target repository name in metadata (to easily resolve recursive layer mounting)
+            [symlinkHeader]: sourceName,
+            // Store source layer metadata so HEAD can answer without loading symlink body.
+            [symlinkDigestHeader]: digest,
+            [symlinkSizeHeader]: `${res.size}`,
+          },
         }),
       );
       if (error) {
@@ -681,6 +694,63 @@ export class R2Registry implements Registry {
       return {
         exists: false,
       };
+    }
+
+    const expectedDigest = tag.startsWith("sha256:") ? tag : null;
+    const actualDigest = res.checksums.sha256 ? hexToDigest(res.checksums.sha256) : null;
+    const symlinkByChecksumMismatch =
+      expectedDigest !== null && actualDigest !== null && actualDigest !== expectedDigest;
+    const symlinkMetadata = res.customMetadata ?? {};
+    const symlinkByMetadata = symlinkHeader in symlinkMetadata;
+
+    // Handle R2 symlink layers.
+    // We detect symlinks by:
+    // 1) explicit metadata, or
+    // 2) checksum mismatch between requested digest and R2 object checksum
+    //    (the symlink object checksum is based on symlink payload, not mounted blob bytes).
+    if (symlinkByMetadata || symlinkByChecksumMismatch) {
+      // Fast path for symlinks created by newer versions that include source metadata.
+      const metadataSize = +(symlinkMetadata[symlinkSizeHeader] ?? "");
+      const metadataDigest = symlinkMetadata[symlinkDigestHeader];
+      if (Number.isFinite(metadataSize) && metadataSize >= 0 && metadataDigest) {
+        return {
+          digest: metadataDigest,
+          size: metadataSize,
+          exists: true,
+        };
+      }
+
+      // Backward-compatibility path for old symlinks: resolve link body and query target.
+      const [obj, getErr] = await wrap(this.env.REGISTRY.get(`${name}/blobs/${tag}`));
+      if (getErr) {
+        return wrapError("layerExists", getErr);
+      }
+      if (!obj) {
+        return { exists: false };
+      }
+
+      const layerPath = await obj.text();
+      const [linkName, linkDigest] = layerPath.split("/blobs/");
+      if (!linkName || !linkDigest) {
+        // Backward compatibility: if this does not look like a symlink payload,
+        // fall back to object metadata from HEAD.
+        if (res.checksums.sha256 === null) {
+          return { response: new ServerError("invalid checksum from R2 backend") };
+        }
+
+        return {
+          digest: hexToDigest(res.checksums.sha256!),
+          size: res.size,
+          exists: true,
+        };
+      }
+
+      // Prevent recursive self-reference.
+      if (linkName === name && linkDigest === tag) {
+        return { exists: false };
+      }
+
+      return await this.env.REGISTRY_CLIENT.layerExists(linkName, linkDigest);
     }
 
     return {
