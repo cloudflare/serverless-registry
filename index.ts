@@ -6,6 +6,8 @@ import { Router } from "itty-router";
 import { AuthErrorResponse, InternalError } from "./src/errors";
 import v2Router from "./src/router";
 import { authenticationMethodFromEnv } from "./src/authentication-method";
+import { RegistryTokens } from "./src/token";
+import type { RegistryAuthProtocolTokenPayload } from "./src/auth";
 import { Registry } from "./src/registry/registry";
 import { R2Registry } from "./src/registry/r2";
 
@@ -21,6 +23,7 @@ export interface Env {
   PASSWORD?: string;
   READONLY_USERNAME?: string;
   READONLY_PASSWORD?: string;
+  READONLY_ANONYMOUS?: string; // "true" allows unauthenticated pulls (GET/HEAD); writes still require auth
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
@@ -46,7 +49,10 @@ export default {
       return new AuthErrorResponse(request);
     }
 
-    const credentials = await authMethod.checkCredentials(request);
+    const credentials =
+      env.READONLY_ANONYMOUS === "true" && !request.headers.get("Authorization")
+        ? RegistryTokens.verifyPayload(request, anonymousPullPayload())
+        : await authMethod.checkCredentials(request);
     if (!credentials.verified) {
       console.warn(`Not Authorized. authmode=${authMethod.authmode}. verified=false`);
       return new AuthErrorResponse(request);
@@ -80,6 +86,19 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+// anonymousPullPayload returns a principal holding only the "pull" capability. It authorizes
+// unauthenticated read requests (GET/HEAD) when READONLY_ANONYMOUS is enabled; writes still fail
+// because verifyPayload requires the "push" capability for POST/PUT/PATCH/DELETE.
+function anonymousPullPayload(): RegistryAuthProtocolTokenPayload {
+  return {
+    username: "anonymous",
+    capabilities: ["pull"],
+    // verifyPayload compares exp against Date.now() expressed in seconds, so exp is seconds.
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    aud: "",
+  };
+}
 
 const ensureConfig = (env: Env): boolean => {
   if (!env.REGISTRY) {
