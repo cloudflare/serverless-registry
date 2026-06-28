@@ -463,10 +463,10 @@ export class R2Registry implements Registry {
       };
     }
 
-    const expectedDigest =
-      tag.startsWith("sha256:") && tag.length > SHA256_PREFIX_LEN ? tag.slice(SHA256_PREFIX_LEN) : null;
+    const expectedDigest = tag.startsWith("sha256:") ? tag : null;
+    const actualDigest = res.checksums.sha256 ? hexToDigest(res.checksums.sha256) : null;
     const symlinkByChecksumMismatch =
-      expectedDigest !== null && res.checksums.sha256 !== null && res.checksums.sha256 !== expectedDigest;
+      expectedDigest !== null && actualDigest !== null && actualDigest !== expectedDigest;
     const symlinkMetadata = res.customMetadata ?? {};
     const symlinkByMetadata = symlinkHeader in symlinkMetadata;
 

@@ -203,6 +203,20 @@ async function createManifest(name: string, schema: ManifestSchema, tag?: string
   return { sha256 };
 }
 
+async function uploadBlob(name: string, data: string): Promise<string> {
+  const digest = await getSHA256(data);
+  const post = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+  expect(post.ok).toBeTruthy();
+  const patch = await fetch(
+    createRequest("PATCH", post.headers.get("location")!, limit(new Blob([data]).stream(), data.length), {}),
+  );
+  expect(patch.ok).toBeTruthy();
+  const put = await fetch(createRequest("PUT", `${patch.headers.get("location")!}&digest=${digest}`, null, {}));
+  expect(put.ok).toBeTruthy();
+  expect(put.headers.get("docker-content-digest")).toEqual(digest);
+  return digest;
+}
+
 function getLayersFromManifest(schema: ManifestSchema): string[] {
   const layersDigest = [];
   if (schema.schemaVersion === 1) {
@@ -420,6 +434,35 @@ describe("v2 manifests", () => {
         expect(+(layerHeadC.headers.get("Content-Length") ?? "-1")).toEqual(sourceData.byteLength);
       }
     }
+  });
+
+  test("HEAD of a cross-repo mounted blob returns source metadata", async () => {
+    const sourceName = "mountsrc/repo";
+    const destinationName = "mountdst/repo";
+    const data = "cross-repo-mounted-layer-bytes";
+    const digest = await uploadBlob(sourceName, data);
+
+    const mount = await fetch(
+      createRequest("POST", `/v2/${destinationName}/blobs/uploads/?from=${sourceName}&mount=${digest}`, null, {}),
+    );
+    expect(mount.status).toEqual(201);
+    expect(mount.headers.get("docker-content-digest")).toEqual(digest);
+
+    const head = await fetch(createRequest("HEAD", `/v2/${destinationName}/blobs/${digest}`, null));
+    expect(head.status).toEqual(200);
+    expect(head.headers.get("Docker-Content-Digest")).toEqual(digest);
+    expect(head.headers.get("Content-Length")).toEqual(`${data.length}`);
+  });
+
+  test("HEAD of a regular blob with /blobs/ in its body is not resolved as a symlink", async () => {
+    const name = "regular-blob-head";
+    const data = "plain payload before /blobs/ after";
+    const digest = await uploadBlob(name, data);
+
+    const head = await fetch(createRequest("HEAD", `/v2/${name}/blobs/${digest}`, null));
+    expect(head.status).toEqual(200);
+    expect(head.headers.get("Docker-Content-Digest")).toEqual(digest);
+    expect(head.headers.get("Content-Length")).toEqual(`${data.length}`);
   });
 });
 
