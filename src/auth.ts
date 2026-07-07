@@ -1,5 +1,6 @@
 import { decode } from "@cfworker/base64url";
 import { errorString } from "./utils";
+import { log } from "./log";
 
 export type RegistryTokenCapability = "push" | "pull";
 export type RegistryAuthProtocolTokenPayload = {
@@ -36,7 +37,7 @@ export function stripUsernamePasswordFromHeader(r: Request): [string, string] | 
 
   // we strictly assume that auth scheme can only be Basic
   if (!encoded || scheme !== "Basic") {
-    console.warn("failed checkCredentials: Authorization doesn't include Basic scheme");
+    log.warn("basic_auth_scheme_invalid", {});
     return { verified: false, payload: null };
   }
 
@@ -59,7 +60,7 @@ export function stripUsernamePasswordFromHeader(r: Request): [string, string] | 
     const password = decoded.substring(index + 1);
     return [username, password];
   } catch (err) {
-    console.error(`Failure getting data from Authorization header: ${errorString(err)}`);
+    log.error("basic_auth_decode_failed", { error: errorString(err) });
     return { verified: false, payload: null };
   }
 }

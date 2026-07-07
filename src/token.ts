@@ -6,6 +6,7 @@ import {
   stripUsernamePasswordFromHeader,
   Authenticator,
 } from "./auth";
+import { log } from "./log";
 
 export function importKeyFromBase64(key: string): JsonWebKeyWithKid {
   // Decodes the base64 value and performs unicode normalization.
@@ -90,7 +91,7 @@ export class RegistryTokens implements Authenticator {
     try {
       // first verify the JWT
       if (!(await jwt.verify(token, this.jwtPublicKey, { algorithm: "ES256" }))) {
-        console.warn("verifyToken: jwt.verify() failed");
+        log.warn("jwt_verify_failed", { reason: "signature_invalid" });
         return { verified: false, payload: null };
       }
 
@@ -104,7 +105,7 @@ export class RegistryTokens implements Authenticator {
 
       // We could throw this error further up to allow more specific error handling,
       // or simply return {verified: false, payload: null  }to indicate token verification failure.
-      console.warn(`verifyToken: ${(error as Error).message}`);
+      log.warn("jwt_verify_error", { message: (error as Error).message });
       return { verified: false, payload: null };
     }
   }
@@ -114,7 +115,7 @@ export class RegistryTokens implements Authenticator {
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && now >= payload.exp) {
       // The token has expired
-      console.warn(`verifyV0Token: failed jwt verification: the token has expired`);
+      log.warn("jwt_expired", { exp: payload.exp ?? null });
       return { verified: false, payload: null };
     }
 
@@ -124,16 +125,14 @@ export class RegistryTokens implements Authenticator {
       case "HEAD":
         // HEAD requests can be used by pushers like docker
         if (!payload.capabilities.includes("pull") && !payload.capabilities.includes("push")) {
-          console.warn(
-            `verifyToken: failed jwt verification: missing any capability for HEAD request in ${request.url}`,
-          );
+          log.warn("jwt_capability_denied", { method: request.method, url: request.url, reason: "missing_any_capability" });
           return { verified: false, payload: null };
         }
         break;
       // PULL method
       case "GET":
         if (this.checkIfV2OnlyPath(request) && payload.capabilities.length === 0) {
-          console.warn("verifyToken: failed jwt verification: missing any capabilities for GET request in /v2/");
+          log.warn("jwt_capability_denied", { method: request.method, url: request.url, reason: "no_capabilities_for_v2" });
           return { verified: false, payload: null };
         }
 
@@ -142,9 +141,7 @@ export class RegistryTokens implements Authenticator {
         }
 
         if (!payload.capabilities.includes("pull")) {
-          console.warn(
-            `verifyToken: failed jwt verification: missing "pull" capability for ${request.method} HTTP method in ${request.url}`,
-          );
+          log.warn("jwt_capability_denied", { method: request.method, url: request.url, required: "pull" });
           return { verified: false, payload: null };
         }
         break;
@@ -155,9 +152,7 @@ export class RegistryTokens implements Authenticator {
       case "DELETE":
       case "PATCH":
         if (!payload.capabilities.includes("push")) {
-          console.warn(
-            `verifyToken: failed jwt verification: missing "push" capability for ${request.method} HTTP method`,
-          );
+          log.warn("jwt_capability_denied", { method: request.method, required: "push" });
           return { verified: false, payload: null };
         }
         break;
