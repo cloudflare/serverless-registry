@@ -1,6 +1,8 @@
 import { Env } from "..";
 import { InternalError } from "./errors";
 import { Chunk } from "./registry/r2";
+import { errorString } from "./utils";
+import { log } from "./log";
 
 // 5MiB
 export const MINIMUM_CHUNK = 1024 * 1024 * 5;
@@ -135,7 +137,7 @@ export async function* split(
   })()
     .then()
     .catch((err) => {
-      console.log("Error on last identity", err);
+      log.error("chunk_identity_error", { error: errorString(err) });
       throw err;
     });
 
