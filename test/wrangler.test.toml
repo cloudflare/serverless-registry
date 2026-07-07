@@ -10,11 +10,15 @@ compatibility_flags = ["nodejs_compat"]
 r2_buckets = [
   { binding = "REGISTRY", bucket_name = "" }
 ]
+analytics_engine_datasets = [
+  { binding = "METRICS", dataset = "dp_artifact_metrics" }
+]
 
 [env.production.vars]
 JWT_REGISTRY_TOKENS_PUBLIC_KEY = ""
 [env.dev]
 r2_buckets = [{ binding = "REGISTRY", bucket_name = "r2-image-registry-dev" }]
+analytics_engine_datasets = [{ binding = "METRICS", dataset = "dp_artifact_metrics_dev" }]
 
 [env.dev.vars]
 USERNAME = "hello"
