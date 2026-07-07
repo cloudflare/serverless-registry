@@ -125,14 +125,22 @@ export class RegistryTokens implements Authenticator {
       case "HEAD":
         // HEAD requests can be used by pushers like docker
         if (!payload.capabilities.includes("pull") && !payload.capabilities.includes("push")) {
-          log.warn("jwt_capability_denied", { method: request.method, url: request.url, reason: "missing_any_capability" });
+          log.warn("jwt_capability_denied", {
+            method: request.method,
+            url: request.url,
+            reason: "missing_any_capability",
+          });
           return { verified: false, payload: null };
         }
         break;
       // PULL method
       case "GET":
         if (this.checkIfV2OnlyPath(request) && payload.capabilities.length === 0) {
-          log.warn("jwt_capability_denied", { method: request.method, url: request.url, reason: "no_capabilities_for_v2" });
+          log.warn("jwt_capability_denied", {
+            method: request.method,
+            url: request.url,
+            reason: "no_capabilities_for_v2",
+          });
           return { verified: false, payload: null };
         }
 
