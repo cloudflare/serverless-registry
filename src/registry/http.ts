@@ -1,6 +1,7 @@
 import { Env } from "../..";
 import { InternalError, ServerError } from "../errors";
 import { errorString } from "../utils";
+import { log } from "../log";
 import { GarbageCollectionMode } from "./garbage-collector";
 import {
   CheckLayerResponse,
@@ -144,11 +145,7 @@ function normalizeReferrersCursor(nextURL: URL, requestURL: URL): string | undef
 function ctxIntoHeaders(ctx: HTTPContext): Headers {
   const headers = new Headers();
   if (ctx.authContext.authType === "none") {
-    console.warn(
-      "Your registry",
-      ctx.authContext.service,
-      "is not using any kind of authentication, making it exposed to the internet",
-    );
+    log.warn("upstream_registry_no_auth", { service: ctx.authContext.service });
     return headers;
   }
 
@@ -208,7 +205,7 @@ function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): 
         authContextOptional[name] = value;
         break;
       default:
-        console.debug(`unknown auth attribute ${name} on registry ${url}`);
+        log.info("auth_attribute_unknown", { name, url });
     }
   });
 
@@ -316,7 +313,7 @@ export class RegistryHTTPClient implements Registry {
 
   async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams) {
     params.delete("password");
-    console.log("sending authentication parameters:", ctx.realm + "?" + params.toString());
+    log.info("auth_bearer_simple_request", { realm: ctx.realm });
 
     return await fetch(ctx.realm + "?" + params.toString(), {
       headers: {
@@ -345,15 +342,13 @@ export class RegistryHTTPClient implements Registry {
       body: params.toString(),
     });
     if (response.status === 404 || response.status === 405 || response.status == 401) {
-      console.debug(
-        this.url.toString(),
-        "Oauth 404/401/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
-      );
+      log.info("oauth_fallback_triggered", { url: this.url.toString() });
       const responseSimple = await this.authenticateBearerSimple(ctx, params);
       if (responseSimple.ok) {
         response = responseSimple;
       } else {
-        console.error(`Oauth fallback also failed: ${responseSimple.status} ${await responseSimple.text()}`);
+        const fallbackBody = await responseSimple.text();
+        log.error("oauth_fallback_failed", { status: responseSimple.status, body: fallbackBody.slice(0, 100) });
       }
     }
 
@@ -371,16 +366,10 @@ export class RegistryHTTPClient implements Registry {
         repository: string;
         token?: string;
       } = JSON.parse(t);
-      console.debug(
-        `Authenticated with registry ${this.url.toString()} successfully, got token that expires in ${
-          response.expires_in
-        } seconds`,
-      );
+      log.info("oauth_token_acquired", { url: this.url.toString(), expiresIn: response.expires_in });
 
       if (!response.access_token && !response.token) {
-        console.error(
-          "Oauth response doesn't have access_token field, doing fallback to password_env, however this might mean that we will 401 later",
-        );
+        log.error("oauth_response_missing_token", {});
       }
 
       return {
@@ -389,13 +378,7 @@ export class RegistryHTTPClient implements Registry {
         accessToken: response.access_token ?? response.token ?? this.authBase64(),
       };
     } catch (err) {
-      console.error(
-        "Doing json response in authentication: ",
-        errorString(err),
-        t.slice(0, Math.min(t.length, 100)),
-        "status",
-        response.status,
-      );
+      log.error("oauth_json_parse_error", { error: errorString(err), body: t.slice(0, Math.min(t.length, 100)), status: response.status });
       throw err;
     }
   }
@@ -426,13 +409,14 @@ export class RegistryHTTPClient implements Registry {
       req.headers.append("Accept", manifestTypes.join(", "));
       const res = await fetch(req);
       if (!res.ok && res.status !== 404) {
-        console.warn(req.url, "->", res.status, "getting manifest:", await res.text());
+        const manifestBody = await res.text();
+        log.warn("manifest_exists_unexpected_status", { url: req.url, status: res.status, body: manifestBody.slice(0, 100) });
         return {
           response: res,
         };
       }
 
-      console.log("->", req.url, res.status);
+      log.info("manifest_exists_checked", { url: req.url, status: res.status });
       return {
         exists: res.ok,
         digest: res.headers.get("Docker-Content-Digest") as string,
@@ -440,7 +424,7 @@ export class RegistryHTTPClient implements Registry {
         contentType: res.headers.get("Content-Type") ?? "",
       };
     } catch (err) {
-      console.error(`Error doing manifest exists with ${namespace} and ${tag}: ` + errorString(err));
+      log.error("manifest_exists_error", { namespace, tag, error: errorString(err) });
       return {
         response: new InternalError(),
       };
@@ -454,7 +438,7 @@ export class RegistryHTTPClient implements Registry {
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
       req.headers.append("Accept", manifestTypes.join(", "));
       const res = await fetch(req);
-      console.log(req.method, res.status, res.url);
+      log.info("manifest_fetched", { method: req.method, status: res.status, url: res.url });
       if (!res.ok) {
         return {
           response: res,
@@ -472,7 +456,7 @@ export class RegistryHTTPClient implements Registry {
         contentType: res.headers.get("Content-Type") ?? "",
       };
     } catch (err) {
-      console.error(`Error doing get manifest with ${namespace} and ${digest}: ` + errorString(err));
+      log.error("get_manifest_error", { namespace, digest, error: errorString(err) });
       return {
         response: new InternalError(),
       };
@@ -512,7 +496,7 @@ export class RegistryHTTPClient implements Registry {
         digest: res.headers.get("Docker-Content-Digest") ?? digest,
       };
     } catch (err) {
-      console.error(`Error doing layer exists with ${namespace} and ${digest}: ` + errorString(err));
+      log.error("layer_exists_error", { namespace, digest, error: errorString(err) });
       return {
         response: new InternalError(),
       };
@@ -555,7 +539,7 @@ export class RegistryHTTPClient implements Registry {
         digest: res.headers.get("Digest-Content-Digest") ?? digest,
       };
     } catch (err) {
-      console.error(`Error doing get layer with ${namespace} and ${digest}: ` + errorString(err));
+      log.error("get_layer_error", { namespace, digest, error: errorString(err) });
       return {
         response: new InternalError(),
       };
@@ -613,7 +597,7 @@ export class RegistryHTTPClient implements Registry {
       }
 
       const res = await fetch(req);
-      console.log(req.method, res.status, res.url);
+      log.info("referrers_fetched", { method: req.method, status: res.status, url: res.url });
       if (!res.ok) {
         return {
           response: res,
@@ -649,7 +633,7 @@ export class RegistryHTTPClient implements Registry {
         cursor,
       };
     } catch (err) {
-      console.error(`Error doing list referrers with ${namespace} and ${digest}: ` + errorString(err));
+      log.error("list_referrers_error", { namespace, digest, error: errorString(err) });
       return {
         response: new InternalError(),
       };
