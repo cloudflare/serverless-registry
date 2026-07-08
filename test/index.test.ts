@@ -1299,25 +1299,25 @@ test("registries configuration", async () => {
     {
       configuration: "{}",
       expected: [],
-      error: "Error parsing registries JSON: zod error:\n✖ Invalid input: expected array, received object",
-      partialError: false,
+      error: '"event":"registries_json_parse_error"',
+      partialError: true,
     },
     {
       configuration: "[{}]",
       expected: [],
-      error: "✖ Invalid input: expected string, received undefined\n  → at [0].registry",
+      error: '"event":"registries_json_parse_error"',
       partialError: true,
     },
     {
       configuration: `[{ "registry": "no-url/hello-world" }]`,
       expected: [],
-      error: "✖ Invalid URL\n  → at [0].registry",
+      error: '"event":"registries_json_parse_error"',
       partialError: true,
     },
     {
       configuration: "bla bla bla no json",
       expected: [],
-      error: "Error parsing registries JSON: error SyntaxError: Unexpected token",
+      error: '"event":"registries_json_parse_error"',
       partialError: true,
     },
     {

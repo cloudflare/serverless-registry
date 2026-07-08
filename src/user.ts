@@ -2,6 +2,7 @@ import { Authenticator, AuthenticatorCheckCredentialsResponse, stripUsernamePass
 import { errorString } from "./utils";
 import { RegistryTokens } from "./token";
 import type { RegistryTokenCapability } from "./auth";
+import { log } from "./log";
 
 export const SHA256_PREFIX = "sha256";
 export const SHA256_PREFIX_LEN = SHA256_PREFIX.length + 1; // add ":"
@@ -88,7 +89,7 @@ export class UserAuthenticator implements Authenticator {
         return { verified: false, payload: null };
       }
     } catch (err) {
-      console.error(`Failed authentication timingSafeEqual: ${errorString(err)}`);
+      log.error("timing_safe_equal_error", { error: errorString(err) });
       return { verified: false, payload: null };
     }
 
