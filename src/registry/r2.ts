@@ -11,7 +11,8 @@ import {
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
 import { SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
-import { readableToBlob, readerToBlob, wrap } from "../utils";
+import { errorString, readableToBlob, readerToBlob, wrap } from "../utils";
+import { log } from "../log";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
   CheckLayerResponse,
@@ -178,7 +179,7 @@ export async function getJWT(env: Env, state: { registryUploadId: string; name: 
     }
     return metadata.jwt;
   } catch (e) {
-    console.error("Error parsing metadata", e);
+    log.error("metadata_parse_error", { error: errorString(e) });
     return null;
   }
 }
@@ -214,7 +215,7 @@ export async function getUploadState(
   // We are skipping state jwt verifying as it doesn't make sense anymore, we are already verifying it's the latest by looking into R2 and comparing the hash.
   const stateObject = jwt.decode<State>(stateStr).payload;
   if (!stateObject) {
-    console.error("Payload property is not in the JWT");
+    log.error("jwt_payload_missing", {});
     throw new InternalError();
   }
 
@@ -363,7 +364,7 @@ export class R2Registry implements Registry {
         const key = manifestElement.digest;
         const res = await this.env.REGISTRY.head(`${name}/manifests/${key}`);
         if (res === null) {
-          console.error(`Manifest with digest ${key} doesn't exist`);
+          log.error("manifest_digest_missing", { key });
           return new ManifestError("BLOB_UNKNOWN", `unknown manifest ${key}`);
         }
       }
@@ -378,7 +379,7 @@ export class R2Registry implements Registry {
     for (const key of layers) {
       const res = await this.env.REGISTRY.head(`${name}/blobs/${key}`);
       if (res === null) {
-        console.error(`Digest ${key} doesn't exist`);
+        log.error("blob_digest_missing", { key });
         return new ManifestError("BLOB_UNKNOWN", `unknown blob ${key}`);
       }
     }
@@ -554,7 +555,7 @@ export class R2Registry implements Registry {
     }
 
     if (!(await this.gc.checkCanInsertData(name, gcMarker))) {
-      console.error("Manifest can't be uploaded as there is/was a garbage collection going");
+      log.error("manifest_upload_blocked_by_gc", {});
       return { response: new ServerError("garbage collection is on-going... check with registry administrator", 500) };
     }
 
@@ -778,7 +779,7 @@ export class R2Registry implements Registry {
     const urlObject = new URL("https://r2-registry.com" + location);
     const stateHash = urlObject.searchParams.get("_stateHash");
     if (stateHash === null) {
-      console.error("State hash is missing");
+      log.error("state_hash_missing", {});
       return { response: new InternalError() };
     }
 
@@ -803,7 +804,7 @@ export class R2Registry implements Registry {
     }
 
     if (state.parts.length >= 10000) {
-      console.error("We're trying to upload 1k parts");
+      log.error("upload_parts_limit_exceeded", {});
       return { response: new InternalError() };
     }
 
@@ -909,9 +910,7 @@ export class R2Registry implements Registry {
 
       // we know here that size >= MINIMUM_CHUNK and size >= lastChunk.size, this is just super inefficient, maybe in the future just throw RangeError here...
       if (env.PUSH_COMPATIBILITY_MODE === "full" && lastChunk && size >= lastChunk.size) {
-        console.warn(
-          "The client is being a bad citizen by trying to send a new chunk bigger than the chunk it sent. If this is giving problems disable this codepath altogether",
-        );
+        log.warn("chunk_size_regression", {});
         for await (const [chunk, chunkSize] of split(stream, size, lastChunk.size)) {
           await appendStreamKnownLength(chunk, chunkSize);
         }
@@ -927,7 +926,7 @@ export class R2Registry implements Registry {
     };
 
     if (length === undefined) {
-      console.error("Length needs to be defined");
+      log.error("upload_length_missing", {});
       return {
         response: new InternalError(),
       };
@@ -959,7 +958,7 @@ export class R2Registry implements Registry {
     const urlObject = new URL("https://r2-registry.com" + location);
     const stateHash = urlObject.searchParams.get("_stateHash");
     if (stateHash === null) {
-      console.error("State hash is missing");
+      log.error("state_hash_missing", {});
       return { response: new InternalError() };
     }
 
@@ -977,14 +976,14 @@ export class R2Registry implements Registry {
     const uuid = state.registryUploadId;
     if (state.parts.length === 0) {
       if (!stream) {
-        console.error("There has been an upload with zero parts and the body is null");
+        log.error("upload_empty_no_body", {});
         return {
           response: new InternalError(),
         };
       }
 
       if (length && length > MAXIMUM_CHUNK) {
-        console.error("Surpasses MAXIMUM_CHUNK");
+        log.error("chunk_size_exceeds_maximum", {});
         return {
           response: new InternalError(),
         };
