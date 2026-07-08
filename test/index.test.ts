@@ -1299,25 +1299,25 @@ test("registries configuration", async () => {
     {
       configuration: "{}",
       expected: [],
-      error: '"event":"registries_json_parse_error"',
-      partialError: true,
+      error: "zod error:\n✖ Invalid input: expected array, received object",
+      partialError: false,
     },
     {
       configuration: "[{}]",
       expected: [],
-      error: '"event":"registries_json_parse_error"',
+      error: "✖ Invalid input: expected string, received undefined\n  → at [0].registry",
       partialError: true,
     },
     {
       configuration: `[{ "registry": "no-url/hello-world" }]`,
       expected: [],
-      error: '"event":"registries_json_parse_error"',
+      error: "✖ Invalid URL\n  → at [0].registry",
       partialError: true,
     },
     {
       configuration: "bla bla bla no json",
       expected: [],
-      error: '"event":"registries_json_parse_error"',
+      error: "error SyntaxError: Unexpected token",
       partialError: true,
     },
     {
@@ -1383,10 +1383,12 @@ test("registries configuration", async () => {
     let calledError = false;
     const prevConsoleError = console.error;
     console.error = (output) => {
+      const parsed = JSON.parse(output as string);
+      expect(parsed).toMatchObject({ level: "error", event: "registries_json_parse_error" });
       if (!testCase.partialError) {
-        expect(output).toEqual(testCase.error);
+        expect(parsed.error).toEqual(testCase.error);
       } else {
-        expect(output).toContain(testCase.error);
+        expect(parsed.error).toContain(testCase.error);
       }
 
       calledError = true;
