@@ -701,11 +701,7 @@ export class R2Registry implements Registry {
     };
   }
 
-  async getLayer(
-    name: string,
-    digest: string,
-    range?: BlobRangeRequest,
-  ): Promise<RegistryError | GetLayerResponse> {
+  async getLayer(name: string, digest: string, range?: BlobRangeRequest): Promise<RegistryError | GetLayerResponse> {
     const key = `${name}/blobs/${digest}`;
 
     if (range === undefined) {
