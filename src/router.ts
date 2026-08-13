@@ -418,6 +418,14 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
     const client = new RegistryHTTPClient(env, registry);
     const response = await client.getLayer(name, digest, range);
     if ("response" in response) {
+      // The blob exists upstream but the requested range doesn't fit it. Blobs are content
+      // addressed, so every registry holding this digest holds the same bytes and would answer the
+      // same way. Report it instead of letting it fall through to the 404 below, which would tell
+      // the client the blob doesn't exist and hide the object size it needs to retry.
+      if (response.response.status === 416) {
+        return response.response;
+      }
+
       continue;
     }
 

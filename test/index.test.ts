@@ -2514,6 +2514,86 @@ describe("blob range requests", () => {
   });
 });
 
+describe("blob range requests against fallback registries", () => {
+  const bindings = env as Env;
+  const data = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+  test("an upstream 416 is reported to the client instead of a 404", async () => {
+    const name = "range-fallback-unsatisfiable";
+    const digest = await getSHA256(data);
+    const previousRegistries = bindings.REGISTRIES_JSON;
+    bindings.REGISTRIES_JSON = JSON.stringify([{ registry: "https://fallback.registry" }]);
+    const blobRequests: { path: string; range: string | null }[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobRequests.push({ path: url.pathname, range: request.headers.get("Range") });
+      // The upstream holds the blob, but the requested range doesn't fit it.
+      const response = new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${data.length}`, "Accept-Ranges": "bytes" },
+      });
+      // A constructed Response has an empty url, which the client would read as a redirect.
+      Object.defineProperty(response, "url", { value: request.url });
+      return response;
+    });
+
+    try {
+      const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=100-200" }));
+      expect(blobRequests).toEqual([{ path: `/v2/${name}/blobs/${digest}`, range: "bytes=100-200" }]);
+      expect(res.status).toEqual(416);
+      expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+    } finally {
+      bindings.REGISTRIES_JSON = previousRegistries;
+    }
+  });
+
+  test("a non-416 upstream failure still falls through to the next registry", async () => {
+    const name = "range-fallback-continue";
+    const digest = await getSHA256(data);
+    const previousRegistries = bindings.REGISTRIES_JSON;
+    bindings.REGISTRIES_JSON = JSON.stringify([
+      { registry: "https://broken.registry" },
+      { registry: "https://healthy.registry" },
+    ]);
+    const blobHosts: string[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobHosts.push(url.host);
+      if (url.host === "broken.registry") {
+        const failure = new Response("boom", { status: 500 });
+        // A constructed Response has an empty url, which the client would read as a redirect.
+        Object.defineProperty(failure, "url", { value: request.url });
+        return failure;
+      }
+
+      return new Response(data.slice(10), {
+        status: 206,
+        headers: { "Content-Range": `bytes 10-${data.length - 1}/${data.length}` },
+      });
+    });
+
+    try {
+      const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=10-" }));
+      expect(blobHosts).toEqual(["broken.registry", "healthy.registry"]);
+      expect(res.status).toEqual(206);
+      expect(res.headers.get("content-range")).toEqual(`bytes 10-${data.length - 1}/${data.length}`);
+      expect(await res.text()).toEqual(data.slice(10));
+    } finally {
+      bindings.REGISTRIES_JSON = previousRegistries;
+    }
+  });
+});
+
 test("docker.io", () => {
   const t = [
     ["https://docker.io", true],
