@@ -136,6 +136,26 @@ the target registry and setup the credentials.
 
 **Never put a registry password/token inside your wrangler config file, please always use `wrangler secrets put`**
 
+#### Adding headers to fallback requests
+
+Use `headers` for non-sensitive values that should be sent with requests to the fallback registry. For sensitive
+values, set `headers_env` to the name of a Worker secret containing a JSON object of header names and values:
+
+```jsonc
+// wrangler.jsonc
+"REGISTRIES_JSON": "[{ \"registry\": \"https://old-registry.example\", \"headers\": { \"X-Registry-Region\": \"legacy\" }, \"headers_env\": \"FALLBACK_REGISTRY_HEADERS\" }]"
+```
+
+```bash
+echo '{"Cf-Access-Client-Id":"client-id","Cf-Access-Client-Secret":"client-secret"}' \
+  | npx wrangler secret put FALLBACK_REGISTRY_HEADERS --env production
+```
+
+Headers from the secret override same-named entries in `headers`. These headers are sent to the configured registry
+and to authentication endpoints on the same origin. They are stripped before requests to a token service or
+redirect target on another origin. If the registry uses Basic or Bearer authentication, the generated
+`Authorization` header overrides an `Authorization` value from this configuration.
+
 You can also use docker.io with anonymous authentication:
 
 ```jsonc

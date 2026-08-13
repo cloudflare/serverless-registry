@@ -1373,6 +1373,22 @@ test("registries configuration", async () => {
       partialError: false,
       error: "",
     },
+    {
+      configuration: `[{
+        "registry": "https://hello.com/domain",
+        "headers": { "X-Registry-Region": "legacy" },
+        "headers_env": "REGISTRY_HEADERS"
+      }]`,
+      expected: [
+        {
+          registry: "https://hello.com/domain",
+          headers: { "X-Registry-Region": "legacy" },
+          headers_env: "REGISTRY_HEADERS",
+        },
+      ],
+      partialError: false,
+      error: "",
+    },
   ] as const;
 
   const bindings = env as Env;
@@ -1401,6 +1417,247 @@ test("registries configuration", async () => {
 describe("http client", () => {
   const bindings = env as Env;
   let envBindings = { ...bindings };
+
+  test("sends configured headers with anonymous registry requests", async () => {
+    envBindings = { ...bindings };
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = JSON.stringify({
+      "Cf-Access-Client-Id": "secret-id",
+      "Cf-Access-Client-Secret": "secret-value",
+    });
+
+    let requestCount = 0;
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      requestCount++;
+      expect(request.headers.get("X-Registry-Region")).toEqual("legacy");
+      expect(request.headers.get("Cf-Access-Client-Id")).toEqual("secret-id");
+      expect(request.headers.get("Cf-Access-Client-Secret")).toEqual("secret-value");
+
+      if (new URL(request.url).pathname === "/v2/") {
+        expect(request.headers.get("User-Agent")).toEqual("Docker-Client/24.0.5 (linux)");
+        return new Response(null, { status: 200 });
+      }
+
+      expect(request.method).toEqual("HEAD");
+      return new Response(null, { status: 404 });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers: {
+        "Cf-Access-Client-Id": "public-id",
+        "X-Registry-Region": "legacy",
+      },
+      headers_env: "REGISTRY_HEADERS",
+    });
+    const result = await client.manifestExists("namespace/image", "latest");
+
+    expect(result).toMatchObject({ exists: false });
+    expect(requestCount).toEqual(2);
+  });
+
+  test("removes registry headers from cross-origin redirects", async () => {
+    envBindings = { ...bindings };
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = JSON.stringify({
+      "Cf-Access-Client-Secret": "secret-value",
+    });
+
+    let requestCount = 0;
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      requestCount++;
+      if (url.host === "storage.example") {
+        expect(request.headers.get("Cf-Access-Client-Secret")).toBeNull();
+        expect(request.headers.get("X-Registry-Region")).toBeNull();
+        expect(request.headers.get("Authorization")).toBeNull();
+        return new Response("blob", {
+          status: 200,
+          headers: { "Content-Length": "4" },
+        });
+      }
+
+      expect(request.headers.get("Cf-Access-Client-Secret")).toEqual("secret-value");
+      expect(request.headers.get("X-Registry-Region")).toEqual("legacy");
+      if (url.pathname === "/v2/") {
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://storage.example/blob" },
+      });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers: { "X-Registry-Region": "legacy" },
+      headers_env: "REGISTRY_HEADERS",
+    });
+    const result = await client.getLayer("namespace/image", numberedDigest(42));
+
+    if ("response" in result) {
+      throw new Error(`expected redirected layer request to succeed, got ${result.response.status}`);
+    }
+    expect(result.size).toEqual(4);
+    expect(await new Response(result.stream).text()).toEqual("blob");
+    expect(requestCount).toEqual(3);
+  });
+
+  test("retains registry headers across same-origin redirects", async () => {
+    envBindings = { ...bindings };
+
+    let requestCount = 0;
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      requestCount++;
+      expect(request.headers.get("Cf-Access-Client-Id")).toEqual("client-id");
+
+      if (url.pathname === "/v2/") {
+        return new Response(null, { status: 200 });
+      }
+
+      if (url.pathname !== "/redirected-manifest") {
+        return new Response(null, {
+          status: 307,
+          headers: { Location: "/redirected-manifest" },
+        });
+      }
+
+      expect(request.method).toEqual("HEAD");
+      return new Response(null, { status: 404 });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers: { "Cf-Access-Client-Id": "client-id" },
+    });
+    const result = await client.manifestExists("namespace/image", "latest");
+
+    expect(result).toMatchObject({ exists: false });
+    expect(requestCount).toEqual(3);
+  });
+
+  test("does not send registry headers to a cross-origin bearer token realm", async () => {
+    envBindings = { ...bindings };
+    envBindings.PASSWORD = "registry-password";
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = JSON.stringify({
+      "Cf-Access-Client-Id": "secret-id",
+      "Cf-Access-Client-Secret": "secret-value",
+    });
+
+    let registryRequests = 0;
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.host === "auth.example") {
+        expect(request.headers.get("Cf-Access-Client-Id")).toBeNull();
+        expect(request.headers.get("Cf-Access-Client-Secret")).toBeNull();
+        expect(request.headers.get("X-Registry-Region")).toBeNull();
+        expect(request.headers.get("Authorization")).toBeNull();
+        return Response.json({ token: "registry-token", expires_in: 300 });
+      }
+
+      registryRequests++;
+      expect(request.headers.get("Cf-Access-Client-Id")).toEqual("secret-id");
+      expect(request.headers.get("Cf-Access-Client-Secret")).toEqual("secret-value");
+      expect(request.headers.get("X-Registry-Region")).toEqual("legacy");
+      if (url.pathname === "/v2/") {
+        expect(request.headers.get("Authorization")).toEqual("Configured value");
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "WWW-Authenticate": 'Bearer realm="https://auth.example/token",service="registry.example"',
+          },
+        });
+      }
+
+      expect(request.headers.get("Authorization")).toEqual("Bearer registry-token");
+      return new Response(null, { status: 404 });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      username: "registry-user",
+      password_env: "PASSWORD",
+      headers: {
+        "Authorization": "Configured value",
+        "X-Registry-Region": "legacy",
+      },
+      headers_env: "REGISTRY_HEADERS",
+    });
+    const result = await client.manifestExists("namespace/image", "latest");
+
+    expect(result).toMatchObject({ exists: false });
+    expect(registryRequests).toEqual(2);
+  });
+
+  test("sends registry headers to a same-origin bearer token realm", async () => {
+    envBindings = { ...bindings };
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = JSON.stringify({
+      "Cf-Access-Client-Id": "secret-id",
+      "Cf-Access-Client-Secret": "secret-value",
+    });
+
+    let requestCount = 0;
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      requestCount++;
+      expect(request.headers.get("Cf-Access-Client-Id")).toEqual("secret-id");
+      expect(request.headers.get("Cf-Access-Client-Secret")).toEqual("secret-value");
+
+      if (url.pathname === "/v2/") {
+        expect(request.headers.get("Authorization")).toEqual("Configured value");
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "WWW-Authenticate": 'Bearer realm="https://registry.example/token",service="registry.example"',
+          },
+        });
+      }
+
+      if (url.pathname === "/token") {
+        expect(request.headers.get("Authorization")).toBeNull();
+        return Response.json({ token: "registry-token", expires_in: 300 });
+      }
+
+      expect(request.headers.get("Authorization")).toEqual("Bearer registry-token");
+      return new Response(null, { status: 404 });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers: { Authorization: "Configured value" },
+      headers_env: "REGISTRY_HEADERS",
+    });
+    const result = await client.manifestExists("namespace/image", "latest");
+
+    expect(result).toMatchObject({ exists: false });
+    expect(requestCount).toEqual(3);
+  });
+
+  test("rejects a missing or malformed registry headers binding", () => {
+    envBindings = { ...bindings };
+    const missingClient = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers_env: "MISSING_HEADERS",
+    });
+    expect(() => missingClient.registryHeaders()).toThrow("registry headers binding MISSING_HEADERS is not set");
+
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = "not json";
+    const malformedClient = new RegistryHTTPClient(envBindings, {
+      registry: "https://registry.example",
+      headers_env: "REGISTRY_HEADERS",
+    });
+    expect(() => malformedClient.registryHeaders()).toThrow(
+      "registry headers binding REGISTRY_HEADERS must contain valid JSON",
+    );
+
+    (envBindings as unknown as Record<string, string>).REGISTRY_HEADERS = JSON.stringify({ header: 123 });
+    expect(() => malformedClient.registryHeaders()).toThrow();
+  });
 
   test("test manifest exists", async () => {
     envBindings = { ...bindings };

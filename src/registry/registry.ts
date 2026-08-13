@@ -5,9 +5,13 @@ import z from "zod";
 import { GarbageCollectionMode } from "./garbage-collector";
 
 // Defines a registry and how it's configured
+export const registryHeaders = z.record(z.string(), z.string());
+
 const registryConfiguration = z
   .object({
     registry: z.url(),
+    headers: registryHeaders.optional(),
+    headers_env: z.string().optional(),
   })
   .and(
     z

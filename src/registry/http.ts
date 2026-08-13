@@ -15,6 +15,7 @@ import {
   Registry,
   RegistryConfiguration,
   RegistryError,
+  registryHeaders,
   UploadId,
   UploadObject,
 } from "./registry";
@@ -42,6 +43,9 @@ type HTTPContext = {
   // If Basic based authentication, this is <username>':'<password> encoded in base64
   // If Bearer based authentication, this is the token that was returned by the Oauth/token endpoint
   accessToken: string;
+  // Headers configured for requests to the registry origin. These are not sent
+  // to an authentication realm on another origin.
+  headers: Headers;
 };
 
 export const manifestTypes = [
@@ -142,7 +146,7 @@ function normalizeReferrersCursor(nextURL: URL, requestURL: URL): string | undef
 }
 
 function ctxIntoHeaders(ctx: HTTPContext): Headers {
-  const headers = new Headers();
+  const headers = new Headers(ctx.headers);
   if (ctx.authContext.authType === "none") {
     console.warn(
       "Your registry",
@@ -152,7 +156,7 @@ function ctxIntoHeaders(ctx: HTTPContext): Headers {
     return headers;
   }
 
-  headers.append("Authorization", (ctx.authContext.authType === "basic" ? "Basic" : "Bearer") + " " + ctx.accessToken);
+  headers.set("Authorization", (ctx.authContext.authType === "basic" ? "Basic" : "Bearer") + " " + ctx.accessToken);
   return headers;
 }
 
@@ -163,9 +167,46 @@ function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string
   return new Request(urlReq, {
     method,
     body,
-    redirect: "follow",
+    redirect: "manual",
     headers: ctxIntoHeaders(ctx),
   });
+}
+
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
+async function fetchRegistryRequest(request: Request): Promise<Response> {
+  const registryOrigin = new URL(request.url).origin;
+  let currentRequest = request;
+
+  for (let redirects = 0; redirects < 10; redirects++) {
+    const response = await fetch(currentRequest);
+    if (!redirectStatuses.has(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("Location");
+    if (location === null) {
+      return response;
+    }
+
+    const redirectURL = new URL(location, currentRequest.url);
+    if (redirectURL.origin !== registryOrigin) {
+      return await fetch(
+        new Request(redirectURL, {
+          method: currentRequest.method,
+          redirect: "follow",
+        }),
+      );
+    }
+
+    currentRequest = new Request(redirectURL, {
+      method: currentRequest.method,
+      headers: currentRequest.headers,
+      redirect: "manual",
+    });
+  }
+
+  throw new Error(`too many redirects fetching ${request.url}`);
 }
 
 function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): AuthContext {
@@ -259,7 +300,47 @@ export class RegistryHTTPClient implements Registry {
     return (this.env as unknown as Record<string, string>)[configuration.password_env] ?? "";
   }
 
+  registryHeaders(): Headers {
+    const headers = new Headers(this.configuration.headers);
+    const headersEnv = this.configuration.headers_env;
+    if (headersEnv === undefined) {
+      return headers;
+    }
+
+    const value = (this.env as unknown as Record<string, string>)[headersEnv];
+    if (value === undefined) {
+      throw new Error(`registry headers binding ${headersEnv} is not set`);
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch (err) {
+      throw new Error(`registry headers binding ${headersEnv} must contain valid JSON`, { cause: err });
+    }
+
+    for (const [name, headerValue] of Object.entries(registryHeaders.parse(parsed))) {
+      headers.set(name, headerValue);
+    }
+    return headers;
+  }
+
+  authenticationRealmHeaders(ctx: AuthContext, registryHeaders: Headers): Headers {
+    const headers = new Headers();
+    if (new URL(ctx.realm).origin !== this.url.origin) {
+      return headers;
+    }
+
+    for (const [name, value] of registryHeaders) {
+      if (name.toLowerCase() !== "authorization") {
+        headers.set(name, value);
+      }
+    }
+    return headers;
+  }
+
   async authenticate(namespace: string): Promise<HTTPContext> {
+    const headers = this.registryHeaders();
     const emptyAuthentication = {
       authContext: {
         authType: "none",
@@ -269,14 +350,18 @@ export class RegistryHTTPClient implements Registry {
       },
       repository: this.url.pathname,
       accessToken: "",
+      headers,
     } as const;
 
-    const res = await fetch(`${this.url.protocol}//${this.url.host}/v2/`, {
-      headers: {
-        "User-Agent": "Docker-Client/24.0.5 (linux)",
-        "Accept-Encoding": "gzip",
-      },
-    });
+    const authenticationHeaders = new Headers(headers);
+    authenticationHeaders.set("User-Agent", "Docker-Client/24.0.5 (linux)");
+    authenticationHeaders.set("Accept-Encoding", "gzip");
+    const res = await fetchRegistryRequest(
+      new Request(`${this.url.protocol}//${this.url.host}/v2/`, {
+        headers: authenticationHeaders,
+        redirect: "manual",
+      }),
+    );
 
     if (res.ok) {
       return emptyAuthentication;
@@ -296,9 +381,9 @@ export class RegistryHTTPClient implements Registry {
     if (!authCtx.scope) authCtx.scope = namespace;
     switch (authCtx.authType) {
       case "bearer":
-        return await this.authenticateBearer(authCtx);
+        return await this.authenticateBearer(authCtx, headers);
       case "basic":
-        return await this.authenticateBasic(authCtx);
+        return await this.authenticateBasic(authCtx, headers);
       default:
         throw new Error("unreachable");
     }
@@ -314,20 +399,22 @@ export class RegistryHTTPClient implements Registry {
     return false;
   }
 
-  async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams) {
+  async authenticateBearerSimple(ctx: AuthContext, params: URLSearchParams, registryHeaders: Headers) {
     params.delete("password");
     console.log("sending authentication parameters:", ctx.realm + "?" + params.toString());
 
+    const headers = this.authenticationRealmHeaders(ctx, registryHeaders);
+    headers.set("Accept", "application/json");
+    headers.set("User-Agent", "Docker-Client/24.0.5 (linux)");
+    if (this.configuration.username !== undefined) {
+      headers.set("Authorization", "Basic " + this.authBase64());
+    }
     return await fetch(ctx.realm + "?" + params.toString(), {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "Docker-Client/24.0.5 (linux)",
-        ...(this.configuration.username !== undefined ? { Authorization: "Basic " + this.authBase64() } : {}),
-      },
+      headers,
     });
   }
 
-  async authenticateBearer(ctx: AuthContext): Promise<HTTPContext> {
+  async authenticateBearer(ctx: AuthContext, headers: Headers): Promise<HTTPContext> {
     const params = new URLSearchParams({
       service: ctx.service,
       // explicitely include that we don't want an offline_token.
@@ -336,11 +423,11 @@ export class RegistryHTTPClient implements Registry {
       grant_type: this.configuration.username === undefined ? "none" : "password",
       password: this.configuration.username === undefined ? "" : this.password(),
     });
+    const authenticationHeaders = this.authenticationRealmHeaders(ctx, headers);
+    authenticationHeaders.set("Content-Type", "application/x-www-form-urlencoded");
+    authenticationHeaders.set("User-Agent", "Docker-Client/24.0.5 (linux)");
     let response = await fetch(ctx.realm, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Docker-Client/24.0.5 (linux)",
-      },
+      headers: authenticationHeaders,
       method: "POST",
       body: params.toString(),
     });
@@ -349,7 +436,7 @@ export class RegistryHTTPClient implements Registry {
         this.url.toString(),
         "Oauth 404/401/405... Falling back to simple token authentication, see https://distribution.github.io/distribution/spec/auth/token",
       );
-      const responseSimple = await this.authenticateBearerSimple(ctx, params);
+      const responseSimple = await this.authenticateBearerSimple(ctx, params, headers);
       if (responseSimple.ok) {
         response = responseSimple;
       } else {
@@ -387,6 +474,7 @@ export class RegistryHTTPClient implements Registry {
         authContext: ctx,
         repository: response.repository ?? this.url.pathname,
         accessToken: response.access_token ?? response.token ?? this.authBase64(),
+        headers,
       };
     } catch (err) {
       console.error(
@@ -400,11 +488,11 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async authenticateBasic(ctx: AuthContext): Promise<HTTPContext> {
+  async authenticateBasic(ctx: AuthContext, headers: Headers): Promise<HTTPContext> {
+    const authenticationHeaders = this.authenticationRealmHeaders(ctx, headers);
+    authenticationHeaders.set("Authorization", "Basic " + this.authBase64());
     const res = await fetch(ctx.realm, {
-      headers: {
-        Authorization: "Basic " + this.authBase64(),
-      },
+      headers: authenticationHeaders,
     });
 
     if (!res.ok) {
@@ -415,6 +503,7 @@ export class RegistryHTTPClient implements Registry {
       authContext: ctx,
       accessToken: this.authBase64(),
       repository: this.url.pathname.slice(1),
+      headers,
     };
   }
 
@@ -424,7 +513,7 @@ export class RegistryHTTPClient implements Registry {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/manifests/${tag}`);
       req.headers.append("Accept", manifestTypes.join(", "));
-      const res = await fetch(req);
+      const res = await fetchRegistryRequest(req);
       if (!res.ok && res.status !== 404) {
         console.warn(req.url, "->", res.status, "getting manifest:", await res.text());
         return {
@@ -453,7 +542,7 @@ export class RegistryHTTPClient implements Registry {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/manifests/${digest}`);
       req.headers.append("Accept", manifestTypes.join(", "));
-      const res = await fetch(req);
+      const res = await fetchRegistryRequest(req);
       console.log(req.method, res.status, res.url);
       if (!res.ok) {
         return {
@@ -483,7 +572,7 @@ export class RegistryHTTPClient implements Registry {
     const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
-      const res = await fetch(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
+      const res = await fetchRegistryRequest(ctxIntoRequest(ctx, this.url, "HEAD", `${namespace}/blobs/${digest}`));
       if (res.status === 404) {
         return {
           exists: false,
@@ -524,25 +613,11 @@ export class RegistryHTTPClient implements Registry {
     try {
       const ctx = await this.authenticate(namespace);
       const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
-      let res = await fetch(req);
+      const res = await fetchRegistryRequest(req);
       if (!res.ok) {
-        // This means we got a redirect, so let's try again this URL but
-        // without any headers. Services like S3 reject authorization headers altogether
-        // if the authentication is included in the URL.
-        if (res.url !== req.url) {
-          const redirectResponse = await fetch(new Request(res.url));
-          if (!redirectResponse.ok) {
-            return {
-              response: res,
-            };
-          }
-
-          res = redirectResponse;
-        } else {
-          return {
-            response: res,
-          };
-        }
+        return {
+          response: res,
+        };
       }
 
       if (res.body === null) {
@@ -612,7 +687,7 @@ export class RegistryHTTPClient implements Registry {
         );
       }
 
-      const res = await fetch(req);
+      const res = await fetchRegistryRequest(req);
       console.log(req.method, res.status, res.url);
       if (!res.ok) {
         return {
