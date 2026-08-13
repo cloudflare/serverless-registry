@@ -153,7 +153,7 @@ v2Router.head("/:name+/manifests/:reference", async (req, env: Env) => {
   }
 
   let checkManifestResponse: CheckManifestResponse | null = null;
-  const registryList = registries(env);
+  const registryList = registries(env, new URL(req.url).hostname);
   for (const registry of registryList) {
     const client = new RegistryHTTPClient(env, registry);
     const response = await client.manifestExists(name, reference);
@@ -225,7 +225,7 @@ v2Router.get("/:name+/manifests/:reference", async (req, env: Env, context: Exec
   }
 
   let getManifestResponse: GetManifestResponse | null = null;
-  const registriesList = registries(env);
+  const registriesList = registries(env, new URL(req.url).hostname);
   for (const registry of registriesList) {
     const client = new RegistryHTTPClient(env, registry);
     const response = await client.getManifest(name, reference);
@@ -371,7 +371,7 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
   }
 
   let layerResponse: GetLayerResponse | null = null;
-  const registriesList = registries(env);
+  const registriesList = registries(env, new URL(req.url).hostname);
   for (const registry of registriesList) {
     const client = new RegistryHTTPClient(env, registry);
     const response = await client.getLayer(name, digest);
@@ -593,7 +593,7 @@ v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
   const res = await env.REGISTRY.head(`${name}/blobs/${tag}`);
   let layerExistsResponse: CheckLayerResponse | null = null;
   if (!res) {
-    const registryList = registries(env);
+    const registryList = registries(env, new URL(req.url).hostname);
     for (const registry of registryList) {
       const client = new RegistryHTTPClient(env, registry);
       const response = await client.layerExists(name, tag);

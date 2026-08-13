@@ -150,6 +150,22 @@ REGISTRIES_JSON = "[{ \"registry\": \"https://index.docker.io/\" }]"
 
 You can also set your `docker.io` credentials in the configuration to not have any rate-limiting.
 
+#### Routing fallbacks by hostname
+
+You can route requests from different hostnames to different fallback registries. Add a `hostnames` array to each registry configuration:
+
+```jsonc
+// wrangler.jsonc
+"REGISTRIES_JSON": "[{ \"registry\": \"https://index.docker.io/\", \"hostnames\": [\"docker-mirror.example.com\"] }, { \"registry\": \"https://quay.io/\", \"hostnames\": [\"quay-mirror.example.com\"] }]"
+```
+
+```toml
+# wrangler.toml
+REGISTRIES_JSON = "[{ \"registry\": \"https://index.docker.io/\", \"hostnames\": [\"docker-mirror.example.com\"] }, { \"registry\": \"https://quay.io/\", \"hostnames\": [\"quay-mirror.example.com\"] }]"
+```
+
+Configurations without `hostnames` remain default fallbacks. If a request matches one or more hostname-specific configurations, the registry only tries those matches. Otherwise, it tries the default fallbacks.
+
 ### Known limitations
 
 Right now there is some limitations with this container registry.

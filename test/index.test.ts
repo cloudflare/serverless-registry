@@ -1398,6 +1398,52 @@ test("registries configuration", async () => {
   }
 });
 
+test("registries configuration supports hostname-specific fallbacks", () => {
+  const bindings = {
+    ...(env as Env),
+    REGISTRIES_JSON: JSON.stringify([
+      {
+        registry: "https://index.docker.io/",
+        hostnames: ["docker-mirror.example.com"],
+      },
+      {
+        registry: "https://quay.io/",
+        hostnames: ["quay-mirror.example.com"],
+      },
+      {
+        registry: "https://docker-secondary.example.com/",
+        hostnames: ["docker-mirror.example.com"],
+      },
+      {
+        registry: "https://default.example.com/",
+      },
+    ]),
+  };
+
+  expect(registries(bindings, "docker-mirror.example.com")).toEqual([
+    {
+      registry: "https://index.docker.io/",
+      hostnames: ["docker-mirror.example.com"],
+    },
+    {
+      registry: "https://docker-secondary.example.com/",
+      hostnames: ["docker-mirror.example.com"],
+    },
+  ]);
+  expect(registries(bindings, "QUAY-MIRROR.EXAMPLE.COM")).toEqual([
+    {
+      registry: "https://quay.io/",
+      hostnames: ["quay-mirror.example.com"],
+    },
+  ]);
+  expect(registries(bindings, "other.example.com")).toEqual([
+    {
+      registry: "https://default.example.com/",
+    },
+  ]);
+  expect(registries(bindings)).toHaveLength(4);
+});
+
 describe("http client", () => {
   const bindings = env as Env;
   let envBindings = { ...bindings };
