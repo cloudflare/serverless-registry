@@ -7,6 +7,7 @@ import { ManifestTagsListTooBigError } from "./v2-responses";
 import { Env } from "..";
 import { MINIMUM_CHUNK, MAXIMUM_CHUNK, MAXIMUM_CHUNK_UPLOAD_SIZE } from "./chunk";
 import {
+  BlobRangeRequest,
   CheckLayerResponse,
   CheckManifestResponse,
   FinishedUploadObject,
@@ -358,16 +359,25 @@ v2Router.get("/:name+/referrers/:digest", async (req, env: Env) => {
   );
 });
 
-// Parses a single HTTP byte range request of the form "bytes=<start>-" or "bytes=<start>-<end>".
-// Multi-range, suffix ("bytes=-<n>") and malformed values are ignored so the full object is served.
-function parseBlobRange(header: string | null): { offset: number; end?: number } | undefined {
+// Parses a single HTTP byte range request of the form "bytes=<start>-", "bytes=<start>-<end>" or
+// the suffix form "bytes=-<n>", which asks for the last n bytes.
+// Multi-range and malformed values are ignored so the full object is served.
+function parseBlobRange(header: string | null): BlobRangeRequest | undefined {
   if (header === null) return undefined;
-  const match = /^bytes=(\d+)-(\d*)$/.exec(header.trim());
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
   if (match === null) return undefined;
-  const offset = Number(match[1]);
+  const [, startValue, endValue] = match;
+  if (startValue === "") {
+    // "bytes=-" has neither a start nor a suffix length, so there is nothing to satisfy.
+    if (endValue === "") return undefined;
+    const suffix = Number(endValue);
+    return Number.isInteger(suffix) ? { suffix } : undefined;
+  }
+
+  const offset = Number(startValue);
   if (!Number.isInteger(offset)) return undefined;
-  if (match[2] === "") return { offset };
-  const end = Number(match[2]);
+  if (endValue === "") return { offset };
+  const end = Number(endValue);
   if (!Number.isInteger(end)) return { offset };
   return { offset, end };
 }

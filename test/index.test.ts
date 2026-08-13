@@ -1562,6 +1562,49 @@ describe("http client", () => {
     );
   });
 
+  test("test get layer forwards a suffix range and surfaces the partial content", async () => {
+    const name = "http-client-suffix-range";
+    const digest = numberedDigest(9950);
+    const body = "abcdefghij";
+
+    envBindings = { ...bindings };
+    envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
+    envBindings.PASSWORD = "world";
+    envBindings.USERNAME = "hello";
+    envBindings.REGISTRIES_JSON = undefined;
+    const blobRequests: { path: string; range: string | null }[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobRequests.push({ path: url.pathname, range: request.headers.get("Range") });
+      return new Response(body.slice(-4), {
+        status: 206,
+        headers: { "Content-Range": `bytes 6-9/${body.length}` },
+      });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://localhost",
+      password_env: "PASSWORD",
+      username,
+    });
+
+    const res = await client.getLayer(name, digest, { suffix: 4 });
+    if ("response" in res) {
+      expect(await res.response.json()).toEqual({ status: res.response.status });
+      throw new Error("expected getLayer to return partial content");
+    }
+
+    expect(blobRequests).toEqual([{ path: `/v2/${name}/blobs/${digest}`, range: "bytes=-4" }]);
+    expect(res.contentRange).toEqual({ start: 6, end: 9, size: body.length });
+    expect(res.size).toEqual(body.length);
+    expect(await new Response(res.stream).text()).toEqual(body.slice(-4));
+  });
+
   test("test list referrers selects rel next from multi-link headers", async () => {
     const name = "http-client-referrers-multilink";
     const subjectDigest = numberedDigest(9970);
@@ -2427,6 +2470,47 @@ describe("blob range requests", () => {
     const res = await fetch(createRequest("HEAD", `/v2/${name}/blobs/${digest}`, null));
     expect(res.ok).toBeTruthy();
     expect(res.headers.get("accept-ranges")).toEqual("bytes");
+  });
+
+  test("suffix Range returns 206 partial content with the last bytes", async () => {
+    const name = "range-suffix";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-5" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes ${data.length - 5}-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual("5");
+    expect(await res.text()).toEqual(data.slice(-5));
+  });
+
+  test("suffix Range longer than the blob returns the whole blob as partial content", async () => {
+    const name = "range-suffix-oversized";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-1000" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 0-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual(`${data.length}`);
+    expect(await res.text()).toEqual(data);
+  });
+
+  test("zero-length suffix Range returns 416 Range Not Satisfiable", async () => {
+    const name = "range-suffix-zero";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-0" }));
+    expect(res.status).toEqual(416);
+    expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+  });
+
+  test("Range header without a start or a suffix length keeps the full 200 behavior", async () => {
+    const name = "range-malformed";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-" }));
+    expect(res.status).toEqual(200);
+    expect(res.headers.get("content-range")).toBeNull();
+    expect(await res.text()).toEqual(data);
   });
 });
 

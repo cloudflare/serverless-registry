@@ -180,6 +180,15 @@ function ctxIntoRequest(
   });
 }
 
+// Serializes a blob range request into an HTTP "Range" request header value.
+function rangeRequestHeader(range: BlobRangeRequest): string {
+  if ("suffix" in range) {
+    return `bytes=-${range.suffix}`;
+  }
+
+  return `bytes=${range.offset}-${range.end === undefined ? "" : range.end}`;
+}
+
 // Parses an HTTP "Content-Range: bytes <start>-<end>/<size>" response header.
 function parseContentRange(header: string | null): { start: number; end: number; size: number } | null {
   if (header === null) return null;
@@ -547,8 +556,7 @@ export class RegistryHTTPClient implements Registry {
     const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
-      const rangeHeader =
-        range === undefined ? undefined : `bytes=${range.offset}-${range.end === undefined ? "" : range.end}`;
+      const rangeHeader = range === undefined ? undefined : rangeRequestHeader(range);
       const req = ctxIntoRequest(
         ctx,
         this.url,

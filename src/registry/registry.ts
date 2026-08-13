@@ -99,11 +99,9 @@ export type GetManifestResponse = {
   contentType: string;
 };
 
-// requested byte range for a layer read (inclusive end; end omitted means until the end of the object)
-export type BlobRangeRequest = {
-  offset: number;
-  end?: number;
-};
+// requested byte range for a layer read. Either an offset with an inclusive end (end omitted means
+// until the end of the object), or a suffix asking for the last N bytes of the object.
+export type BlobRangeRequest = { offset: number; end?: number } | { suffix: number };
 
 // returned by getLayer when it successfully retrieves a layer
 export type GetLayerResponse = {

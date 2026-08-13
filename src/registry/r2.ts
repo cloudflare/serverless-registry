@@ -761,14 +761,27 @@ export class R2Registry implements Registry {
     }
 
     const totalSize = head.size;
-    const start = range.offset;
-    if (start < 0 || start >= totalSize) {
-      return { response: rangeNotSatisfiableResponse(totalSize) };
-    }
+    let start: number;
+    let end: number;
+    if ("suffix" in range) {
+      // A suffix longer than the object is satisfied by the whole object, but a zero-length suffix
+      // selects no bytes at all and cannot be satisfied.
+      if (range.suffix <= 0 || totalSize === 0) {
+        return { response: rangeNotSatisfiableResponse(totalSize) };
+      }
 
-    const end = range.end === undefined ? totalSize - 1 : Math.min(range.end, totalSize - 1);
-    if (end < start) {
-      return { response: rangeNotSatisfiableResponse(totalSize) };
+      start = Math.max(totalSize - range.suffix, 0);
+      end = totalSize - 1;
+    } else {
+      start = range.offset;
+      if (start < 0 || start >= totalSize) {
+        return { response: rangeNotSatisfiableResponse(totalSize) };
+      }
+
+      end = range.end === undefined ? totalSize - 1 : Math.min(range.end, totalSize - 1);
+      if (end < start) {
+        return { response: rangeNotSatisfiableResponse(totalSize) };
+      }
     }
 
     const length = end - start + 1;
