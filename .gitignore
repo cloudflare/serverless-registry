@@ -5,3 +5,7 @@ node_modules
 wrangler.toml
 wrangler.jsonc
 *.tsbuildinfo
+
+# local credentials & build artifacts
+registry-credentials.txt
+dist/

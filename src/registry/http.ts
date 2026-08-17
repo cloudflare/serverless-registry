@@ -293,7 +293,11 @@ export class RegistryHTTPClient implements Registry {
     }
 
     const authCtx = authHeaderIntoAuthContext(this.url, authenticateHeader);
-    if (!authCtx.scope) authCtx.scope = namespace;
+    // The scope returned by the upstream /v2/ endpoint is only a placeholder
+    // (e.g. ghcr.io returns "repository:user/image:pull"). Always use the
+    // namespace from the actual request, otherwise the scope ends up
+    // double-prefixed (repository:repository:...) and the token request fails.
+    authCtx.scope = namespace;
     switch (authCtx.authType) {
       case "bearer":
         return await this.authenticateBearer(authCtx);
@@ -331,7 +335,7 @@ export class RegistryHTTPClient implements Registry {
     const params = new URLSearchParams({
       service: ctx.service,
       // explicitely include that we don't want an offline_token.
-      scope: `repository:${ctx.scope}:pull,push`,
+      scope: `repository:${ctx.scope}:pull`,
       client_id: "r2registry",
       grant_type: this.configuration.username === undefined ? "none" : "password",
       password: this.configuration.username === undefined ? "" : this.password(),
