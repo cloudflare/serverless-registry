@@ -21,6 +21,10 @@ export interface Env {
   PASSWORD?: string;
   READONLY_USERNAME?: string;
   READONLY_PASSWORD?: string;
+  // Set to "true" to serve pull requests (GET/HEAD) without authentication.
+  // Mutating methods (push, delete) still require credentials. Note this also
+  // exposes read-only discovery endpoints like /v2/_catalog anonymously.
+  ANONYMOUS_PULL?: string;
   PUSH_COMPATIBILITY_MODE?: PushCompatibilityMode;
   REGISTRIES_JSON?: string; // should be in the format of RegistryConfiguration[];
   REGISTRY_CLIENT: Registry;
@@ -41,15 +45,18 @@ export default {
       return new AuthErrorResponse(request);
     }
 
-    const authMethod = await authenticationMethodFromEnv(env);
-    if (!authMethod) {
-      return new AuthErrorResponse(request);
-    }
+    const anonymousPull = env.ANONYMOUS_PULL === "true" && (request.method === "GET" || request.method === "HEAD");
+    if (!anonymousPull) {
+      const authMethod = await authenticationMethodFromEnv(env);
+      if (!authMethod) {
+        return new AuthErrorResponse(request);
+      }
 
-    const credentials = await authMethod.checkCredentials(request);
-    if (!credentials.verified) {
-      console.warn(`Not Authorized. authmode=${authMethod.authmode}. verified=false`);
-      return new AuthErrorResponse(request);
+      const credentials = await authMethod.checkCredentials(request);
+      if (!credentials.verified) {
+        console.warn(`Not Authorized. authmode=${authMethod.authmode}. verified=false`);
+        return new AuthErrorResponse(request);
+      }
     }
 
     env.REGISTRY_CLIENT = new R2Registry(env);

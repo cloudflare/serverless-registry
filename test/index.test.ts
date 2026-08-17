@@ -2528,3 +2528,63 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("anonymous pull", () => {
+  async function fetchAnonymousPull(r: Request): Promise<Response> {
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(r, { ...env, ANONYMOUS_PULL: "true" } as Env, ctx);
+    await waitOnExecutionContext(ctx);
+    return res as Response;
+  }
+
+  test("GET /v2/ needs no credentials when ANONYMOUS_PULL is enabled", async () => {
+    const res = await fetchAnonymousPull(createRequest("GET", "/v2/", null));
+    expect(res.status).toBe(200);
+  });
+
+  test("GET /v2/ still requires credentials when ANONYMOUS_PULL is disabled", async () => {
+    const res = await fetchUnauth(createRequest("GET", "/v2/", null));
+    expect(res.status).toBe(401);
+  });
+
+  test("manifests and blobs pull anonymously, with bad credentials ignored", async () => {
+    const name = "anonymous-pull-test";
+    const manifest = await generateManifest(name);
+    const { sha256 } = await uploadManifest(name, manifest, "latest");
+
+    const getRes = await fetchAnonymousPull(createRequest("GET", `/v2/${name}/manifests/latest`, null));
+    expect(getRes.status).toBe(200);
+    expect(getRes.headers.get("docker-content-digest")).toEqual(sha256);
+
+    const headRes = await fetchAnonymousPull(createRequest("HEAD", `/v2/${name}/manifests/latest`, null));
+    expect(headRes.status).toBe(200);
+
+    const imageManifest = getImageManifestV2(manifest);
+    const blobRes = await fetchAnonymousPull(
+      createRequest("GET", `/v2/${name}/blobs/${imageManifest.layers[0].digest}`, null),
+    );
+    expect(blobRes.status).toBe(200);
+
+    // Garbage credentials on a pull must not break anonymous access.
+    const badCredRes = await fetchAnonymousPull(
+      createRequest("GET", `/v2/${name}/manifests/latest`, null, {
+        Authorization: usernamePasswordToAuth("nobody", "wrong"),
+      }),
+    );
+    expect(badCredRes.status).toBe(200);
+  });
+
+  test("mutating methods still require credentials when ANONYMOUS_PULL is enabled", async () => {
+    const name = "anonymous-pull-test-mutations";
+    const uploadRes = await fetchAnonymousPull(createRequest("POST", `/v2/${name}/blobs/uploads/`, null));
+    expect(uploadRes.status).toBe(401);
+
+    const putRes = await fetchAnonymousPull(
+      createRequest("PUT", `/v2/${name}/manifests/latest`, new Blob(["{}"]).stream()),
+    );
+    expect(putRes.status).toBe(401);
+
+    const deleteRes = await fetchAnonymousPull(createRequest("DELETE", `/v2/${name}/manifests/latest`, null));
+    expect(deleteRes.status).toBe(401);
+  });
+});
