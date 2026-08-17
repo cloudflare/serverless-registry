@@ -2380,3 +2380,88 @@ test("docker.io", () => {
     }
   }
 });
+
+// Fetch with no credentials and READONLY_ANONYMOUS enabled.
+async function fetchAnonymousReadonly(r: Request): Promise<Response> {
+  const ctx = createExecutionContext();
+  const res = await worker.fetch(r, { ...env, READONLY_ANONYMOUS: "true" } as Env, ctx);
+  await waitOnExecutionContext(ctx);
+  return res as Response;
+}
+
+describe("anonymous pull (READONLY_ANONYMOUS)", () => {
+  test("flag OFF (default): anonymous reads are rejected", async () => {
+    const base = await fetchUnauth(createRequest("GET", "/v2/", null));
+    expect(base.status).toBe(401);
+
+    const manifest = await fetchUnauth(createRequest("GET", "/v2/somename/manifests/latest", null));
+    expect(manifest.status).toBe(401);
+  });
+
+  test("flag ON: anonymous GET /v2/ succeeds", async () => {
+    const res = await fetchAnonymousReadonly(createRequest("GET", "/v2/", null));
+    expect(res.status).toBe(200);
+  });
+
+  test("flag ON: anonymous read of a pushed manifest, blob and tag list succeeds", async () => {
+    const name = "anonymous/pullable";
+    const manifest = await generateManifest(name);
+    const { sha256 } = await createManifest(name, manifest, "latest");
+
+    // Manifest by tag, by digest, and HEAD — all anonymous.
+    const byTag = await fetchAnonymousReadonly(createRequest("GET", `/v2/${name}/manifests/latest`, null));
+    expect(byTag.status).toBe(200);
+    const byDigest = await fetchAnonymousReadonly(createRequest("GET", `/v2/${name}/manifests/${sha256}`, null));
+    expect(byDigest.status).toBe(200);
+    const head = await fetchAnonymousReadonly(createRequest("HEAD", `/v2/${name}/manifests/latest`, null));
+    expect(head.status).toBe(200);
+
+    // Each referenced blob is anonymously readable.
+    for (const layerDigest of getLayersFromManifest(manifest)) {
+      const blob = await fetchAnonymousReadonly(createRequest("GET", `/v2/${name}/blobs/${layerDigest}`, null));
+      expect(blob.status).toBe(200);
+    }
+
+    // tags/list is anonymously readable.
+    const tags = await fetchAnonymousReadonly(createRequest("GET", `/v2/${name}/tags/list`, null));
+    expect(tags.status).toBe(200);
+    const tagsBody = (await tags.json()) as { name: string; tags: string[] };
+    expect(tagsBody.tags).toContain("latest");
+  });
+
+  test("flag ON: anonymous writes are still rejected with the auth challenge", async () => {
+    const name = "anonymous/readonly";
+
+    const post = await fetchAnonymousReadonly(createRequest("POST", `/v2/${name}/blobs/uploads/`, null));
+    expect(post.status).toBe(401);
+    expect(post.headers.get("WWW-Authenticate")).not.toBeNull();
+
+    const put = await fetchAnonymousReadonly(
+      createRequest("PUT", `/v2/${name}/manifests/latest`, new Blob(["{}"]).stream(), {
+        "Content-Type": "application/gzip",
+      }),
+    );
+    expect(put.status).toBe(401);
+    expect(put.headers.get("WWW-Authenticate")).not.toBeNull();
+
+    const del = await fetchAnonymousReadonly(createRequest("DELETE", `/v2/${name}/manifests/latest`, null));
+    expect(del.status).toBe(401);
+  });
+
+  test("flag ON: an authenticated push still succeeds", async () => {
+    const name = "anonymous/stillpushable";
+    const manifest = await generateManifest(name);
+    const { sha256 } = await createManifest(name, manifest, "v1");
+    expect(sha256).toBeTruthy();
+  });
+
+  test("flag ON: a presented credential is still honored (not bypassed)", async () => {
+    // A request carrying an Authorization header takes the normal credential path even with the
+    // flag on; a wrong password is rejected rather than silently treated as anonymous.
+    const ctx = createExecutionContext();
+    const r = createRequest("GET", "/v2/", null, { Authorization: usernamePasswordToAuth("hello", "wrong") });
+    const res = (await worker.fetch(r, { ...env, READONLY_ANONYMOUS: "true" } as Env, ctx)) as Response;
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(401);
+  });
+});

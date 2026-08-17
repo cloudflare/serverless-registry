@@ -66,6 +66,19 @@ Set the USERNAME and PASSWORD as secrets with `npx wrangler secret put USERNAME 
 You can add a base64 encoded JWT public key to verify passwords (or token) that are signed by the private key.
 `npx wrangler secret put JWT_REGISTRY_TOKENS_PUBLIC_KEY --env production`
 
+### Enabling anonymous (public) pull
+
+Set `READONLY_ANONYMOUS = "true"` to allow unauthenticated pulls. With the flag on, requests
+that carry no `Authorization` header are treated as holding the `pull` capability, so
+`GET`/`HEAD` (manifests, blobs, referrers, tag listings) succeed without credentials. Write
+methods (`POST`/`PUT`/`PATCH`/`DELETE`) still require an authenticated push credential — an
+anonymous write is rejected with the usual `WWW-Authenticate` challenge. A request that does
+present an `Authorization` header always takes the normal credential path.
+
+The flag defaults off, preserving the existing behavior where every request requires
+authentication. Enable it only when the whole namespace served by the worker is meant to be
+world-readable.
+
 ### Using with Docker
 
 You can use this registry with Docker to push and pull images.
