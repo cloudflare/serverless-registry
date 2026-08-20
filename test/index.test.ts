@@ -1710,6 +1710,49 @@ describe("http client", () => {
     );
   });
 
+  test("test get layer forwards a suffix range and surfaces the partial content", async () => {
+    const name = "http-client-suffix-range";
+    const digest = numberedDigest(9950);
+    const body = "abcdefghij";
+
+    envBindings = { ...bindings };
+    envBindings.JWT_REGISTRY_TOKENS_PUBLIC_KEY = "";
+    envBindings.PASSWORD = "world";
+    envBindings.USERNAME = "hello";
+    envBindings.REGISTRIES_JSON = undefined;
+    const blobRequests: { path: string; range: string | null }[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobRequests.push({ path: url.pathname, range: request.headers.get("Range") });
+      return new Response(body.slice(-4), {
+        status: 206,
+        headers: { "Content-Range": `bytes 6-9/${body.length}` },
+      });
+    });
+
+    const client = new RegistryHTTPClient(envBindings, {
+      registry: "https://localhost",
+      password_env: "PASSWORD",
+      username,
+    });
+
+    const res = await client.getLayer(name, digest, { suffix: 4 });
+    if ("response" in res) {
+      expect(await res.response.json()).toEqual({ status: res.response.status });
+      throw new Error("expected getLayer to return partial content");
+    }
+
+    expect(blobRequests).toEqual([{ path: `/v2/${name}/blobs/${digest}`, range: "bytes=-4" }]);
+    expect(res.contentRange).toEqual({ start: 6, end: 9, size: body.length });
+    expect(res.size).toEqual(body.length);
+    expect(await new Response(res.stream).text()).toEqual(body.slice(-4));
+  });
+
   test("test list referrers selects rel next from multi-link headers", async () => {
     const name = "http-client-referrers-multilink";
     const subjectDigest = numberedDigest(9970);
@@ -2506,6 +2549,195 @@ describe("garbage collector", () => {
       expect(listManifests.objects.length).toEqual(0);
       const listBlobs = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listBlobs.objects.length).toEqual(0);
+    }
+  });
+});
+
+describe("blob range requests", () => {
+  async function uploadBlob(name: string, data: string): Promise<string> {
+    const sha256 = await getSHA256(data);
+    const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    expect(res.ok).toBeTruthy();
+    const stream = limit(new Blob([data]).stream(), data.length);
+    const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
+    expect(res2.ok).toBeTruthy();
+    const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
+    expect(last.ok).toBeTruthy();
+    return sha256;
+  }
+
+  const data = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+  test("open-ended Range returns 206 partial content from the offset", async () => {
+    const name = "range-open";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=10-" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 10-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual(`${data.length - 10}`);
+    expect(res.headers.get("accept-ranges")).toEqual("bytes");
+    expect(await res.text()).toEqual(data.slice(10));
+  });
+
+  test("bounded Range returns 206 partial content for the requested window", async () => {
+    const name = "range-bounded";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=5-14" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 5-14/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual("10");
+    expect(await res.text()).toEqual(data.slice(5, 15));
+  });
+
+  test("no Range header keeps the existing full 200 behavior", async () => {
+    const name = "range-none";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null));
+    expect(res.status).toEqual(200);
+    expect(res.headers.get("content-length")).toEqual(`${data.length}`);
+    expect(res.headers.get("content-range")).toBeNull();
+    expect(await res.text()).toEqual(data);
+  });
+
+  test("out-of-bounds Range returns 416 Range Not Satisfiable", async () => {
+    const name = "range-oob";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=100-200" }));
+    expect(res.status).toEqual(416);
+    expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+  });
+
+  test("HEAD blob response advertises Accept-Ranges", async () => {
+    const name = "range-head";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("HEAD", `/v2/${name}/blobs/${digest}`, null));
+    expect(res.ok).toBeTruthy();
+    expect(res.headers.get("accept-ranges")).toEqual("bytes");
+  });
+
+  test("suffix Range returns 206 partial content with the last bytes", async () => {
+    const name = "range-suffix";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-5" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes ${data.length - 5}-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual("5");
+    expect(await res.text()).toEqual(data.slice(-5));
+  });
+
+  test("suffix Range longer than the blob returns the whole blob as partial content", async () => {
+    const name = "range-suffix-oversized";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-1000" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 0-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual(`${data.length}`);
+    expect(await res.text()).toEqual(data);
+  });
+
+  test("zero-length suffix Range returns 416 Range Not Satisfiable", async () => {
+    const name = "range-suffix-zero";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-0" }));
+    expect(res.status).toEqual(416);
+    expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+  });
+
+  test("Range header without a start or a suffix length keeps the full 200 behavior", async () => {
+    const name = "range-malformed";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=-" }));
+    expect(res.status).toEqual(200);
+    expect(res.headers.get("content-range")).toBeNull();
+    expect(await res.text()).toEqual(data);
+  });
+});
+
+describe("blob range requests against fallback registries", () => {
+  const bindings = env as Env;
+  const data = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+  test("an upstream 416 is reported to the client instead of a 404", async () => {
+    const name = "range-fallback-unsatisfiable";
+    const digest = await getSHA256(data);
+    const previousRegistries = bindings.REGISTRIES_JSON;
+    bindings.REGISTRIES_JSON = JSON.stringify([{ registry: "https://fallback.registry" }]);
+    const blobRequests: { path: string; range: string | null }[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobRequests.push({ path: url.pathname, range: request.headers.get("Range") });
+      // The upstream holds the blob, but the requested range doesn't fit it.
+      const response = new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${data.length}`, "Accept-Ranges": "bytes" },
+      });
+      // A constructed Response has an empty url, which the client would read as a redirect.
+      Object.defineProperty(response, "url", { value: request.url });
+      return response;
+    });
+
+    try {
+      const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=100-200" }));
+      expect(blobRequests).toEqual([{ path: `/v2/${name}/blobs/${digest}`, range: "bytes=100-200" }]);
+      expect(res.status).toEqual(416);
+      expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+    } finally {
+      bindings.REGISTRIES_JSON = previousRegistries;
+    }
+  });
+
+  test("a non-416 upstream failure still falls through to the next registry", async () => {
+    const name = "range-fallback-continue";
+    const digest = await getSHA256(data);
+    const previousRegistries = bindings.REGISTRIES_JSON;
+    bindings.REGISTRIES_JSON = JSON.stringify([
+      { registry: "https://broken.registry" },
+      { registry: "https://healthy.registry" },
+    ]);
+    const blobHosts: string[] = [];
+    using _fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as string | URL | Request, init);
+      const url = new URL(request.url);
+      if (url.pathname === "/v2/" || url.pathname === "/v2") {
+        return new Response(null, { status: 200 });
+      }
+
+      blobHosts.push(url.host);
+      if (url.host === "broken.registry") {
+        const failure = new Response("boom", { status: 500 });
+        // A constructed Response has an empty url, which the client would read as a redirect.
+        Object.defineProperty(failure, "url", { value: request.url });
+        return failure;
+      }
+
+      return new Response(data.slice(10), {
+        status: 206,
+        headers: { "Content-Range": `bytes 10-${data.length - 1}/${data.length}` },
+      });
+    });
+
+    try {
+      const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=10-" }));
+      expect(blobHosts).toEqual(["broken.registry", "healthy.registry"]);
+      expect(res.status).toEqual(206);
+      expect(res.headers.get("content-range")).toEqual(`bytes 10-${data.length - 1}/${data.length}`);
+      expect(await res.text()).toEqual(data.slice(10));
+    } finally {
+      bindings.REGISTRIES_JSON = previousRegistries;
     }
   });
 });

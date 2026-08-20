@@ -17,6 +17,7 @@ import {
   RegistryError,
   UploadId,
   UploadObject,
+  BlobRangeRequest,
 } from "./registry";
 import { ociImageIndexContentType } from "./r2";
 
@@ -156,16 +157,48 @@ function ctxIntoHeaders(ctx: HTTPContext): Headers {
   return headers;
 }
 
-function ctxIntoRequest(ctx: HTTPContext, url: URL, method: string, path: string, body?: BodyInit): Request {
+function ctxIntoRequest(
+  ctx: HTTPContext,
+  url: URL,
+  method: string,
+  path: string,
+  body?: BodyInit,
+  extraHeaders?: HeadersInit,
+): Request {
   const urlReq = `${url.protocol}//${url.host}/v2${
     ctx.repository === "" || ctx.repository === "/" ? "/" : ctx.repository + "/"
   }${path}`;
+  const headers = ctxIntoHeaders(ctx);
+  if (extraHeaders !== undefined) {
+    new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
+  }
   return new Request(urlReq, {
     method,
     body,
     redirect: "follow",
-    headers: ctxIntoHeaders(ctx),
+    headers,
   });
+}
+
+// Serializes a blob range request into an HTTP "Range" request header value.
+function rangeRequestHeader(range: BlobRangeRequest): string {
+  if ("suffix" in range) {
+    return `bytes=-${range.suffix}`;
+  }
+
+  return `bytes=${range.offset}-${range.end === undefined ? "" : range.end}`;
+}
+
+// Parses an HTTP "Content-Range: bytes <start>-<end>/<size>" response header.
+function parseContentRange(header: string | null): { start: number; end: number; size: number } | null {
+  if (header === null) return null;
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header.trim());
+  if (match === null) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const size = Number(match[3]);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(size)) return null;
+  return { start, end, size };
 }
 
 function authHeaderIntoAuthContext(urlObject: URL, authenticateHeader: string): AuthContext {
@@ -519,18 +552,28 @@ export class RegistryHTTPClient implements Registry {
     }
   }
 
-  async getLayer(name: string, digest: string): Promise<GetLayerResponse | RegistryError> {
+  async getLayer(name: string, digest: string, range?: BlobRangeRequest): Promise<GetLayerResponse | RegistryError> {
     const namespace = name.includes("/") || !isDockerDotIO(this.url) ? name : `library/${name}`;
     try {
       const ctx = await this.authenticate(namespace);
-      const req = ctxIntoRequest(ctx, this.url, "GET", `${namespace}/blobs/${digest}`);
+      const rangeHeader = range === undefined ? undefined : rangeRequestHeader(range);
+      const req = ctxIntoRequest(
+        ctx,
+        this.url,
+        "GET",
+        `${namespace}/blobs/${digest}`,
+        undefined,
+        rangeHeader !== undefined ? { Range: rangeHeader } : undefined,
+      );
       let res = await fetch(req);
       if (!res.ok) {
         // This means we got a redirect, so let's try again this URL but
         // without any headers. Services like S3 reject authorization headers altogether
         // if the authentication is included in the URL.
         if (res.url !== req.url) {
-          const redirectResponse = await fetch(new Request(res.url));
+          const redirectResponse = await fetch(
+            new Request(res.url, rangeHeader !== undefined ? { headers: { Range: rangeHeader } } : undefined),
+          );
           if (!redirectResponse.ok) {
             return {
               response: res,
@@ -549,11 +592,27 @@ export class RegistryHTTPClient implements Registry {
         throw new Error("returned body is null");
       }
 
-      return {
+      const layer: GetLayerResponse = {
         stream: res.body,
         size: +(res.headers.get("Content-Length") ?? "0"),
         digest: res.headers.get("Digest-Content-Digest") ?? digest,
       };
+
+      // If we asked for a range and the upstream honored it, surface the partial-content metadata so
+      // the caller can reply with 206. A 200 here means the upstream ignored the range and we serve
+      // the full blob (best-effort). Serving a partial body as if it were complete would corrupt it,
+      // so a 206 without a parseable Content-Range is treated as an error.
+      if (range !== undefined && res.status === 206) {
+        const contentRange = parseContentRange(res.headers.get("Content-Range"));
+        if (contentRange === null) {
+          throw new Error("upstream returned 206 without a parseable Content-Range header");
+        }
+
+        layer.size = contentRange.size;
+        layer.contentRange = contentRange;
+      }
+
+      return layer;
     } catch (err) {
       console.error(`Error doing get layer with ${namespace} and ${digest}: ` + errorString(err));
       return {

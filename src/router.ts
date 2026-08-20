@@ -7,6 +7,7 @@ import { ManifestTagsListTooBigError } from "./v2-responses";
 import { Env } from "..";
 import { MINIMUM_CHUNK, MAXIMUM_CHUNK, MAXIMUM_CHUNK_UPLOAD_SIZE } from "./chunk";
 import {
+  BlobRangeRequest,
   CheckLayerResponse,
   CheckManifestResponse,
   FinishedUploadObject,
@@ -358,54 +359,104 @@ v2Router.get("/:name+/referrers/:digest", async (req, env: Env) => {
   );
 });
 
+// Parses a single HTTP byte range request of the form "bytes=<start>-", "bytes=<start>-<end>" or
+// the suffix form "bytes=-<n>", which asks for the last n bytes.
+// Multi-range and malformed values are ignored so the full object is served.
+function parseBlobRange(header: string | null): BlobRangeRequest | undefined {
+  if (header === null) return undefined;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (match === null) return undefined;
+  const [, startValue, endValue] = match;
+  if (startValue === "") {
+    // "bytes=-" has neither a start nor a suffix length, so there is nothing to satisfy.
+    if (endValue === "") return undefined;
+    const suffix = Number(endValue);
+    return Number.isInteger(suffix) ? { suffix } : undefined;
+  }
+
+  const offset = Number(startValue);
+  if (!Number.isInteger(offset)) return undefined;
+  if (endValue === "") return { offset };
+  const end = Number(endValue);
+  if (!Number.isInteger(end)) return { offset };
+  return { offset, end };
+}
+
+function blobGetResponse(layer: GetLayerResponse): Response {
+  const headers: Record<string, string> = {
+    "Docker-Content-Digest": layer.digest,
+    "Accept-Ranges": "bytes",
+  };
+  if (layer.contentRange !== undefined) {
+    const { start, end, size } = layer.contentRange;
+    headers["Content-Length"] = `${end - start + 1}`;
+    headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+    return new Response(layer.stream, { status: 206, headers });
+  }
+
+  headers["Content-Length"] = `${layer.size}`;
+  return new Response(layer.stream, { headers });
+}
+
 v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionContext) => {
   const { name, digest } = req.params;
-  const res = await env.REGISTRY_CLIENT.getLayer(name, digest);
+  const range = parseBlobRange(req.headers.get("range"));
+  const res = await env.REGISTRY_CLIENT.getLayer(name, digest, range);
   if (!("response" in res)) {
-    return new Response(res.stream, {
-      headers: {
-        "Docker-Content-Digest": res.digest,
-        "Content-Length": `${res.size}`,
-      },
-    });
+    return blobGetResponse(res);
+  }
+
+  // A requested range that cannot be satisfied is reported directly instead of falling back to
+  // other registries.
+  if (res.response.status === 416) {
+    return res.response;
   }
 
   let layerResponse: GetLayerResponse | null = null;
   const registriesList = registries(env);
   for (const registry of registriesList) {
     const client = new RegistryHTTPClient(env, registry);
-    const response = await client.getLayer(name, digest);
+    const response = await client.getLayer(name, digest, range);
     if ("response" in response) {
+      // The blob exists upstream but the requested range doesn't fit it. Blobs are content
+      // addressed, so every registry holding this digest holds the same bytes and would answer the
+      // same way. Report it instead of letting it fall through to the 404 below, which would tell
+      // the client the blob doesn't exist and hide the object size it needs to retry.
+      if (response.response.status === 416) {
+        return response.response;
+      }
+
       continue;
     }
 
     layerResponse = response;
-    const [s1, s2] = layerResponse.stream.tee();
-    layerResponse.stream = s1;
-    context.waitUntil(
-      (async () => {
-        const [response, err] = await wrap(env.REGISTRY_CLIENT.monolithicUpload(name, digest, s2, layerResponse.size));
-        if (err) {
-          console.error("Error uploading asynchronously the layer ", digest, "into main registry");
-          return;
-        }
+    // Only cache full-object responses. A ranged/partial upstream response must never be written to
+    // R2 as if it were the complete blob, or the cached object would be corrupt.
+    if (range === undefined && layerResponse.contentRange === undefined) {
+      const fullLayer = layerResponse;
+      const [s1, s2] = fullLayer.stream.tee();
+      fullLayer.stream = s1;
+      context.waitUntil(
+        (async () => {
+          const [response, err] = await wrap(env.REGISTRY_CLIENT.monolithicUpload(name, digest, s2, fullLayer.size));
+          if (err) {
+            console.error("Error uploading asynchronously the layer ", digest, "into main registry");
+            return;
+          }
 
-        if (response === false) {
-          console.error("Layer might be too big for the registry client", layerResponse.size);
-        }
-      })(),
-    );
+          if (response === false) {
+            console.error("Layer might be too big for the registry client", fullLayer.size);
+          }
+        })(),
+      );
+    }
+
     break;
   }
 
   if (layerResponse === null) return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
 
-  return new Response(layerResponse.stream, {
-    headers: {
-      "Docker-Content-Digest": layerResponse.digest,
-      "Content-Length": `${layerResponse.size}`,
-    },
-  });
+  return blobGetResponse(layerResponse);
 });
 
 v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
@@ -625,6 +676,7 @@ v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
     headers: {
       "Content-Length": layerExistsResponse.size.toString(),
       "Docker-Content-Digest": layerExistsResponse.digest,
+      "Accept-Ranges": "bytes",
     },
   });
 });
