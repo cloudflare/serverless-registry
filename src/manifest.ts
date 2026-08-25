@@ -1,6 +1,5 @@
 import { z } from "zod";
-
-const dockerManifestListContentType = "application/vnd.docker.distribution.manifest.list.v2+json";
+import { dockerManifestListContentType } from "./media-types";
 
 const platformSchema = z.object({
   "architecture": z.string(),

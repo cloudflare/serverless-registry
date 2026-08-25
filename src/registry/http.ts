@@ -18,7 +18,13 @@ import {
   UploadId,
   UploadObject,
 } from "./registry";
-import { ociImageIndexContentType } from "./r2";
+import {
+  dockerManifestListContentType,
+  ociImageIndexContentType,
+  dockerManifestV1PrettyJwsContentType,
+  ociImageManifestContentType,
+  dockerManifestV2ContentType,
+} from "../media-types";
 
 type AuthContext = {
   authType: AuthType;
@@ -45,12 +51,12 @@ type HTTPContext = {
 };
 
 export const manifestTypes = [
-  "application/vnd.docker.distribution.manifest.list.v2+json",
-  "application/vnd.oci.image.index.v1+json",
-  "application/vnd.docker.distribution.manifest.v1+prettyjws",
+  dockerManifestListContentType,
+  ociImageIndexContentType,
+  dockerManifestV1PrettyJwsContentType,
   "application/json",
-  "application/vnd.oci.image.manifest.v1+json",
-  "application/vnd.docker.distribution.manifest.v2+json",
+  ociImageManifestContentType,
+  dockerManifestV2ContentType,
 ] as const;
 
 export type ManifestType = (typeof manifestTypes)[number];

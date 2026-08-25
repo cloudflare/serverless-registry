@@ -32,8 +32,6 @@ import {
 import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
 
-export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
-
 function referrersPrefix(name: string, digest: string): string {
   return `${name}/_referrers/${digest}/`;
 }

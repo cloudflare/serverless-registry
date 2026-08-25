@@ -18,7 +18,7 @@ import {
   registries,
 } from "./registry/registry";
 import { RegistryHTTPClient } from "./registry/http";
-import { ociImageIndexContentType } from "./registry/r2";
+import { ociImageIndexContentType } from "./media-types";
 
 const maxReferrersListLimit = 1000;
 const isOpaqueReferrersCursor = (cursor: string) => cursor.startsWith("/v2/");
