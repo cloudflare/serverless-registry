@@ -358,16 +358,48 @@ v2Router.get("/:name+/referrers/:digest", async (req, env: Env) => {
   );
 });
 
+// Parses a single HTTP byte range request of the form "bytes=<start>-" or "bytes=<start>-<end>".
+// Multi-range, suffix ("bytes=-<n>") and malformed values are ignored so the full object is served.
+function parseBlobRange(header: string | null): { offset: number; end?: number } | undefined {
+  if (header === null) return undefined;
+  const match = /^bytes=(\d+)-(\d*)$/.exec(header.trim());
+  if (match === null) return undefined;
+  const offset = Number(match[1]);
+  if (!Number.isInteger(offset)) return undefined;
+  if (match[2] === "") return { offset };
+  const end = Number(match[2]);
+  if (!Number.isInteger(end)) return { offset };
+  return { offset, end };
+}
+
+function blobGetResponse(layer: GetLayerResponse): Response {
+  const headers: Record<string, string> = {
+    "Docker-Content-Digest": layer.digest,
+    "Accept-Ranges": "bytes",
+  };
+  if (layer.contentRange !== undefined) {
+    const { start, end, size } = layer.contentRange;
+    headers["Content-Length"] = `${end - start + 1}`;
+    headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+    return new Response(layer.stream, { status: 206, headers });
+  }
+
+  headers["Content-Length"] = `${layer.size}`;
+  return new Response(layer.stream, { headers });
+}
+
 v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionContext) => {
   const { name, digest } = req.params;
-  const res = await env.REGISTRY_CLIENT.getLayer(name, digest);
+  const range = parseBlobRange(req.headers.get("range"));
+  const res = await env.REGISTRY_CLIENT.getLayer(name, digest, range);
   if (!("response" in res)) {
-    return new Response(res.stream, {
-      headers: {
-        "Docker-Content-Digest": res.digest,
-        "Content-Length": `${res.size}`,
-      },
-    });
+    return blobGetResponse(res);
+  }
+
+  // A requested range that cannot be satisfied is reported directly instead of falling back to
+  // other registries.
+  if (res.response.status === 416) {
+    return res.response;
   }
 
   let layerResponse: GetLayerResponse | null = null;
@@ -400,12 +432,7 @@ v2Router.get("/:name+/blobs/:digest", async (req, env: Env, context: ExecutionCo
 
   if (layerResponse === null) return new Response(JSON.stringify(BlobUnknownError), { status: 404 });
 
-  return new Response(layerResponse.stream, {
-    headers: {
-      "Docker-Content-Digest": layerResponse.digest,
-      "Content-Length": `${layerResponse.size}`,
-    },
-  });
+  return blobGetResponse(layerResponse);
 });
 
 v2Router.delete("/:name+/blobs/uploads/:id", async (req, env: Env) => {
@@ -625,6 +652,7 @@ v2Router.head("/:name+/blobs/:tag", async (req, env: Env) => {
     headers: {
       "Content-Length": layerExistsResponse.size.toString(),
       "Docker-Content-Digest": layerExistsResponse.digest,
+      "Accept-Ranges": "bytes",
     },
   });
 });

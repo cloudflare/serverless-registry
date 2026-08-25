@@ -28,11 +28,22 @@ import {
   UploadId,
   UploadObject,
   wrapError,
+  BlobRangeRequest,
 } from "./registry";
 import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
 
 export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
+
+function rangeNotSatisfiableResponse(size: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      "Content-Range": `bytes */${size}`,
+      "Accept-Ranges": "bytes",
+    },
+  });
+}
 
 function referrersPrefix(name: string, digest: string): string {
   return `${name}/_referrers/${digest}/`;
@@ -690,8 +701,78 @@ export class R2Registry implements Registry {
     };
   }
 
-  async getLayer(name: string, digest: string): Promise<RegistryError | GetLayerResponse> {
-    const [res, err] = await wrap(this.env.REGISTRY.get(`${name}/blobs/${digest}`));
+  async getLayer(
+    name: string,
+    digest: string,
+    range?: BlobRangeRequest,
+  ): Promise<RegistryError | GetLayerResponse> {
+    const key = `${name}/blobs/${digest}`;
+
+    if (range === undefined) {
+      const [res, err] = await wrap(this.env.REGISTRY.get(key));
+      if (err) {
+        return wrapError("getLayer", err);
+      }
+
+      if (!res) {
+        return {
+          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+        };
+      }
+
+      // Handle R2 symlink
+      if (res.customMetadata && symlinkHeader in res.customMetadata) {
+        return await this.followLayerSymlink(name, digest, res, undefined);
+      }
+
+      return {
+        stream: res.body!,
+        digest: hexToDigest(res.checksums.sha256!),
+        size: res.size,
+      };
+    }
+
+    // Ranged read: inspect object metadata first so we can validate the requested range and
+    // resolve symlinks without streaming the full object.
+    const [head, headErr] = await wrap(this.env.REGISTRY.head(key));
+    if (headErr) {
+      return wrapError("getLayer", headErr);
+    }
+
+    if (!head) {
+      return {
+        response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+      };
+    }
+
+    if (head.customMetadata && symlinkHeader in head.customMetadata) {
+      const [link, linkErr] = await wrap(this.env.REGISTRY.get(key));
+      if (linkErr) {
+        return wrapError("getLayer", linkErr);
+      }
+
+      if (!link) {
+        return {
+          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+        };
+      }
+
+      return await this.followLayerSymlink(name, digest, link, range);
+    }
+
+    const totalSize = head.size;
+    const start = range.offset;
+    if (start < 0 || start >= totalSize) {
+      return { response: rangeNotSatisfiableResponse(totalSize) };
+    }
+
+    const end = range.end === undefined ? totalSize - 1 : Math.min(range.end, totalSize - 1);
+    if (end < start) {
+      return { response: rangeNotSatisfiableResponse(totalSize) };
+    }
+
+    const length = end - start + 1;
+    const [res, err] = await wrap(this.env.REGISTRY.get(key, { range: { offset: start, length } }));
     if (err) {
       return wrapError("getLayer", err);
     }
@@ -702,24 +783,29 @@ export class R2Registry implements Registry {
       };
     }
 
-    // Handle R2 symlink
-    if (res.customMetadata && symlinkHeader in res.customMetadata) {
-      const layerPath = await res.text();
-      // Symlink detected! Will download layer from "layerPath"
-      const [linkName, linkDigest] = layerPath.split("/blobs/");
-      if (linkName == name && linkDigest == digest) {
-        return {
-          response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
-        };
-      }
-      return await this.env.REGISTRY_CLIENT.getLayer(linkName, linkDigest);
-    }
-
     return {
       stream: res.body!,
-      digest: hexToDigest(res.checksums.sha256!),
-      size: res.size,
+      digest: hexToDigest(head.checksums.sha256!),
+      size: totalSize,
+      contentRange: { start, end, size: totalSize },
     };
+  }
+
+  private async followLayerSymlink(
+    name: string,
+    digest: string,
+    object: R2ObjectBody,
+    range: BlobRangeRequest | undefined,
+  ): Promise<RegistryError | GetLayerResponse> {
+    const layerPath = await object.text();
+    // Symlink detected! Will download layer from "layerPath"
+    const [linkName, linkDigest] = layerPath.split("/blobs/");
+    if (linkName == name && linkDigest == digest) {
+      return {
+        response: new Response(JSON.stringify(BlobUnknownError), { status: 404 }),
+      };
+    }
+    return await this.env.REGISTRY_CLIENT.getLayer(linkName, linkDigest, range);
   }
 
   async startUpload(namespace: string): Promise<RegistryError | UploadObject> {

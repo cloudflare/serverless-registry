@@ -99,11 +99,19 @@ export type GetManifestResponse = {
   contentType: string;
 };
 
+// requested byte range for a layer read (inclusive end; end omitted means until the end of the object)
+export type BlobRangeRequest = {
+  offset: number;
+  end?: number;
+};
+
 // returned by getLayer when it successfully retrieves a layer
 export type GetLayerResponse = {
   stream: ReadableStream;
   digest: string;
   size: number;
+  // present when the response is a partial (ranged) read, drives the 206 Partial Content response
+  contentRange?: { start: number; end: number; size: number };
 };
 
 export type ReferrerDescriptor = {
@@ -150,7 +158,7 @@ export interface Registry {
   layerExists(namespace: string, digest: string): Promise<CheckLayerResponse | RegistryError>;
 
   // get a layer stream from the registry
-  getLayer(namespace: string, digest: string): Promise<GetLayerResponse | RegistryError>;
+  getLayer(namespace: string, digest: string, range?: BlobRangeRequest): Promise<GetLayerResponse | RegistryError>;
 
   // list referrers for a subject digest
   listReferrers(

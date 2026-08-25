@@ -2510,6 +2510,74 @@ describe("garbage collector", () => {
   });
 });
 
+describe("blob range requests", () => {
+  async function uploadBlob(name: string, data: string): Promise<string> {
+    const sha256 = await getSHA256(data);
+    const res = await fetch(createRequest("POST", `/v2/${name}/blobs/uploads/`, null, {}));
+    expect(res.ok).toBeTruthy();
+    const stream = limit(new Blob([data]).stream(), data.length);
+    const res2 = await fetch(createRequest("PATCH", res.headers.get("location")!, stream, {}));
+    expect(res2.ok).toBeTruthy();
+    const last = await fetch(createRequest("PUT", res2.headers.get("location")! + "&digest=" + sha256, null, {}));
+    expect(last.ok).toBeTruthy();
+    return sha256;
+  }
+
+  const data = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+  test("open-ended Range returns 206 partial content from the offset", async () => {
+    const name = "range-open";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=10-" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 10-${data.length - 1}/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual(`${data.length - 10}`);
+    expect(res.headers.get("accept-ranges")).toEqual("bytes");
+    expect(await res.text()).toEqual(data.slice(10));
+  });
+
+  test("bounded Range returns 206 partial content for the requested window", async () => {
+    const name = "range-bounded";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=5-14" }));
+    expect(res.status).toEqual(206);
+    expect(res.headers.get("content-range")).toEqual(`bytes 5-14/${data.length}`);
+    expect(res.headers.get("content-length")).toEqual("10");
+    expect(await res.text()).toEqual(data.slice(5, 15));
+  });
+
+  test("no Range header keeps the existing full 200 behavior", async () => {
+    const name = "range-none";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null));
+    expect(res.status).toEqual(200);
+    expect(res.headers.get("content-length")).toEqual(`${data.length}`);
+    expect(res.headers.get("content-range")).toBeNull();
+    expect(await res.text()).toEqual(data);
+  });
+
+  test("out-of-bounds Range returns 416 Range Not Satisfiable", async () => {
+    const name = "range-oob";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("GET", `/v2/${name}/blobs/${digest}`, null, { Range: "bytes=100-200" }));
+    expect(res.status).toEqual(416);
+    expect(res.headers.get("content-range")).toEqual(`bytes */${data.length}`);
+  });
+
+  test("HEAD blob response advertises Accept-Ranges", async () => {
+    const name = "range-head";
+    const digest = await uploadBlob(name, data);
+
+    const res = await fetch(createRequest("HEAD", `/v2/${name}/blobs/${digest}`, null));
+    expect(res.ok).toBeTruthy();
+    expect(res.headers.get("accept-ranges")).toEqual("bytes");
+  });
+});
+
 test("docker.io", () => {
   const t = [
     ["https://docker.io", true],
