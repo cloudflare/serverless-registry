@@ -22,3 +22,16 @@ export const BlobUnknownError = {
     },
   ],
 };
+
+export const DigestInvalidError = (message = "provided digest did not match uploaded content") =>
+  ({
+    errors: [
+      {
+        code: "DIGEST_INVALID",
+        message,
+        detail: {
+          message: "The provided digest did not match the content received by the registry.",
+        },
+      },
+    ],
+  }) as const;
