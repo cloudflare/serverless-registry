@@ -24,11 +24,10 @@ It only supports `Basic` authentication as it's the one that serverless-registry
 It's able to chunk layers depending on the header `oci-chunk-max-length` returned by the registry when the client
 creates an upload.
 
-## Interesting output folders
+## Temporary files
 
-- Every \*.tar in the push folder is the exported image from docker, which is extracted into `.cache`.
-- Then it's compressed to gzip and saved into `.cache`. Files that end in `-ptr` have a digest in the content that
-  refers to another layer in the folder.
+Each run creates an isolated workspace in the operating system's temporary directory for the exported image,
+extracted layers, and gzip cache. The workspace is removed after both successful and failed pushes.
 
 There is a few more workarounds in the code like having to use node-fetch as Bun overrides the Content-Length
 header from the caller.

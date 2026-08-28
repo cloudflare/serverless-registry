@@ -2,6 +2,9 @@
   "name": "push",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "test": "node --test workspace.node-test.mjs"
+  },
   "devDependencies": {
     "@types/tar-fs": "^2.0.4",
     "bun-types": "latest"
