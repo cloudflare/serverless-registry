@@ -69,7 +69,9 @@ if (!(await file(tarFile).exists())) {
 
   console.log(`Image saved as ${tarFile}, extracting...`);
 
-  await mkdir(imagePath);
+  // recursive, so a leftover .output-image from an interrupted run does not
+  // make this throw EEXIST.
+  await mkdir(imagePath, { recursive: true });
 
   await extract({
     file: tarFile,
@@ -131,7 +133,9 @@ for (const layer of manifest.Layers) {
       }
 
       const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
-      await rm(inprogressPath, { recursive: true });
+      // force, because on a cold cache there is nothing to remove and rm would
+      // throw ENOENT, which made the very first run of the tool always fail.
+      await rm(inprogressPath, { recursive: true, force: true });
 
       const hasher = new Bun.CryptoHasher("sha256");
       const cacheWriter = file(inprogressPath).writer();
