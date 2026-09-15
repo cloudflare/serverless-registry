@@ -1,6 +1,16 @@
 import { z } from "zod";
 
-const dockerManifestListContentType = "application/vnd.docker.distribution.manifest.list.v2+json";
+export const ociImageManifestContentType = "application/vnd.oci.image.manifest.v1+json";
+export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
+export const dockerImageManifestContentType = "application/vnd.docker.distribution.manifest.v2+json";
+export const dockerManifestListContentType = "application/vnd.docker.distribution.manifest.list.v2+json";
+
+const manifestContentTypes: ReadonlySet<string> = new Set([
+  ociImageManifestContentType,
+  ociImageIndexContentType,
+  dockerImageManifestContentType,
+  dockerManifestListContentType,
+]);
 
 const platformSchema = z.object({
   "architecture": z.string(),
@@ -80,3 +90,29 @@ export const manifestSchema = z
   );
 
 export type ManifestSchema = z.infer<typeof manifestSchema>;
+
+/**
+ * The top-level mediaType is OPTIONAL in the OCI image-spec ("SHOULD be used"), and clients
+ * such as Helm omit it. The Content-Type header of the PUT carries the same information, so
+ * fill it in from there before validating.
+ *
+ * Only the parsed object is changed. Manifest bytes are stored verbatim, so the stored object
+ * still hashes to the digest the client pushed it under.
+ */
+export function withInferredMediaType(manifestJSON: unknown, contentType: string): unknown {
+  if (typeof manifestJSON !== "object" || manifestJSON === null || Array.isArray(manifestJSON)) {
+    return manifestJSON;
+  }
+
+  const manifest = manifestJSON as Record<string, unknown>;
+  if (manifest.schemaVersion !== 2 || manifest.mediaType !== undefined) {
+    return manifestJSON;
+  }
+
+  const mediaType = contentType.split(";")[0].trim();
+  if (!manifestContentTypes.has(mediaType)) {
+    return manifestJSON;
+  }
+
+  return { ...manifest, mediaType };
+}
