@@ -116,3 +116,14 @@ export function withInferredMediaType(manifestJSON: unknown, contentType: string
 
   return { ...manifest, mediaType };
 }
+
+/** A failed union reports a bare "Invalid input" at the root; the detail is in the per-option issues. */
+export function manifestIssueMessage(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (issue === undefined) return "invalid manifest";
+
+  const candidates = issue.code === "invalid_union" ? issue.errors.flat() : [issue];
+  const best = candidates.find((candidate) => candidate.path.length > 0) ?? issue;
+  const path = best.path.length ? `${best.path.join(".")}: ` : "";
+  return `${path}${best.message}`;
+}

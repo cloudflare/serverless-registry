@@ -334,6 +334,24 @@ describe("v2 manifests", () => {
     expect(await stored?.text()).toEqual(data);
   });
 
+  test("PUT /v2/:name/manifests/:reference rejects when no mediaType is available at all", async () => {
+    const name = "helm-chart-unknown-content-type";
+    const withoutMediaType: Record<string, unknown> = { ...getImageManifestV2(await generateManifest(name)) };
+    delete withoutMediaType.mediaType;
+
+    const response = await fetch(
+      createRequest("PUT", `/v2/${name}/manifests/v1`, new Blob([JSON.stringify(withoutMediaType)]).stream(), {
+        "Content-Type": "application/gzip",
+      }),
+    );
+
+    expect(response.status).toEqual(400);
+    const body = (await response.json()) as { errors: { code: string; message: string }[] };
+    expect(body.errors[0].code).toEqual("MANIFEST_INVALID");
+    // the union error must name the offending field rather than a bare "Invalid input"
+    expect(body.errors[0].message).toContain("mediaType");
+  });
+
   test("HEAD /v2/:name/manifests/:reference NOT FOUND", async () => {
     const response = await fetch(createRequest("GET", "/v2/notfound/manifests/reference", null));
     expect(response.status).toBe(404);
