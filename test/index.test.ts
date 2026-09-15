@@ -311,6 +311,47 @@ async function seedReferrerIndex(name: string, subjectDigest: string, descriptor
 }
 
 describe("v2 manifests", () => {
+  test("PUT /v2/:name/manifests/:reference infers mediaType from Content-Type", async () => {
+    const name = "helm-chart";
+    const bindings = env as Env;
+    // Helm omits the OPTIONAL top-level mediaType; the Content-Type header carries it instead.
+    const withoutMediaType: Record<string, unknown> = { ...getImageManifestV2(await generateManifest(name)) };
+    delete withoutMediaType.mediaType;
+
+    const data = JSON.stringify(withoutMediaType);
+    const sha256 = await getSHA256(data);
+    const response = await fetch(
+      createRequest("PUT", `/v2/${name}/manifests/v1`, new Blob([data]).stream(), {
+        "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+      }),
+    );
+
+    expect(response.ok).toBeTruthy();
+    expect(response.headers.get("docker-content-digest")).toEqual(sha256);
+
+    // The stored bytes must be exactly what was pushed, or they no longer hash to the digest.
+    const stored = await bindings.REGISTRY.get(`${name}/manifests/${sha256}`);
+    expect(await stored?.text()).toEqual(data);
+  });
+
+  test("PUT /v2/:name/manifests/:reference rejects when no mediaType is available at all", async () => {
+    const name = "helm-chart-unknown-content-type";
+    const withoutMediaType: Record<string, unknown> = { ...getImageManifestV2(await generateManifest(name)) };
+    delete withoutMediaType.mediaType;
+
+    const response = await fetch(
+      createRequest("PUT", `/v2/${name}/manifests/v1`, new Blob([JSON.stringify(withoutMediaType)]).stream(), {
+        "Content-Type": "application/gzip",
+      }),
+    );
+
+    expect(response.status).toEqual(400);
+    const body = (await response.json()) as { errors: { code: string; message: string }[] };
+    expect(body.errors[0].code).toEqual("MANIFEST_INVALID");
+    // the union error must name the offending field rather than a bare "Invalid input"
+    expect(body.errors[0].message).toContain("mediaType");
+  });
+
   test("HEAD /v2/:name/manifests/:reference NOT FOUND", async () => {
     const response = await fetch(createRequest("GET", "/v2/notfound/manifests/reference", null));
     expect(response.status).toBe(404);
@@ -480,6 +521,51 @@ describe("v2 manifests", () => {
 });
 
 describe("v2 referrers", () => {
+  test("PUT with subject and an inferred mediaType still indexes referrers", async () => {
+    const name = "referrers-inferred-mediatype";
+    const bindings = env as Env;
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const { sha256: subjectDigest } = await createManifest(name, subjectManifest, "latest");
+
+    const artifactManifest = {
+      ...getImageManifestV2(await generateManifest(name)),
+      subject: {
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
+      },
+    } satisfies ManifestSchema;
+    const withoutMediaType: Record<string, unknown> = { ...artifactManifest };
+    delete withoutMediaType.mediaType;
+
+    const data = JSON.stringify(withoutMediaType);
+    const artifactDigest = await getSHA256(data);
+    const response = await fetch(
+      createRequest("PUT", `/v2/${name}/manifests/${artifactDigest}`, new Blob([data]).stream(), {
+        "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+      }),
+    );
+
+    expect(response.ok).toBeTruthy();
+    expect(response.headers.get("oci-subject")).toEqual(subjectDigest);
+
+    // Without substituting the inferred mediaType into the parsed manifest, this descriptor is
+    // written with mediaType undefined and every later read of it is silently dropped.
+    const expectedDescriptor = {
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      digest: artifactDigest,
+      size: new Blob([data]).size,
+      // no explicit artifactType, so it falls back to the config mediaType
+      artifactType: artifactManifest.config.mediaType,
+    };
+    const descriptorObject = await bindings.REGISTRY.get(`${name}/_referrers/${subjectDigest}/${artifactDigest}`);
+    expect(descriptorObject).not.toBeNull();
+    expect(await descriptorObject?.json()).toEqual(expectedDescriptor);
+
+    const referrers = await getReferrersIndex(name, subjectDigest);
+    expect(referrers.body.manifests).toEqual([expectedDescriptor]);
+  });
+
   test("PUT with subject indexes referrers and paginates results", async () => {
     const name = "referrers-index";
     const bindings = env as Env;
