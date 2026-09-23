@@ -535,17 +535,8 @@ export class R2Registry implements Registry {
         response: new ManifestError("MANIFEST_INVALID", `invalid subject digest ${subjectDigest}`),
       };
     }
-    if (subjectDigest !== undefined) {
-      const [subjectManifest, subjectManifestErr] = await wrap(env.REGISTRY.head(`${name}/manifests/${subjectDigest}`));
-      if (subjectManifestErr) {
-        return wrapError("putManifestInner", subjectManifestErr);
-      }
-      if (subjectManifest === null) {
-        return {
-          response: new ManifestError("BLOB_UNKNOWN", `unknown subject ${subjectDigest}`),
-        };
-      }
-    }
+    // The subject does not need to exist yet: clients such as Docker may push referrers (e.g. attestations)
+    // before or concurrently with their subject manifest.
 
     const referrerDescriptor = descriptorFromManifest(manifest, digestStr, blob.size);
     if (checkLayers) {
