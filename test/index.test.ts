@@ -1102,34 +1102,30 @@ describe("v2 referrers", () => {
     expect(response.status).toEqual(400);
   });
 
-  test("PUT /v2/:name/manifests/:reference rejects missing local subjects", async () => {
+  test("PUT /v2/:name/manifests/:reference accepts referrers pushed before their subject", async () => {
     const name = "referrers-missing-subject";
     const bindings = env as Env;
-    const missingSubjectDigest = numberedDigest(4500);
+    const subjectManifest = getImageManifestV2(await generateManifest(name));
+    const subjectDigest = await getSHA256(JSON.stringify(subjectManifest));
     const artifactManifest = {
       ...getImageManifestV2(await generateManifest(name)),
       artifactType: "application/vnd.cloudchamber.btrfs-chain.v1",
       subject: {
-        mediaType: "application/vnd.oci.image.manifest.v1+json",
-        digest: missingSubjectDigest,
-        size: 123,
+        mediaType: subjectManifest.mediaType,
+        digest: subjectDigest,
+        size: manifestSize(subjectManifest),
       },
     } satisfies ManifestSchema;
-    const artifactDigest = await getSHA256(JSON.stringify(artifactManifest));
 
-    const response = await fetch(
-      createRequest("PUT", `/v2/${name}/manifests/artifact`, new Blob([JSON.stringify(artifactManifest)]).stream(), {
-        "Content-Type": "application/gzip",
-      }),
-    );
+    const { sha256: artifactDigest, response } = await uploadManifest(name, artifactManifest, "artifact");
+    expect(response.status).toEqual(201);
+    expect(response.headers.get("oci-subject")).toEqual(subjectDigest);
+    expect(await bindings.REGISTRY.head(`${name}/manifests/${subjectDigest}`)).toBeNull();
+    expect(await bindings.REGISTRY.head(`${name}/_referrers/${subjectDigest}/${artifactDigest}`)).toBeTruthy();
 
-    expect(response.status).toEqual(400);
-    expect((await response.json()) as { errors: { code: string; message: string }[] }).toEqual({
-      errors: [expect.objectContaining({ code: "BLOB_UNKNOWN", message: `unknown subject ${missingSubjectDigest}` })],
-    });
-    expect(await bindings.REGISTRY.head(`${name}/manifests/artifact`)).toBeNull();
-    expect(await bindings.REGISTRY.head(`${name}/manifests/${artifactDigest}`)).toBeNull();
-    expect(await bindings.REGISTRY.head(`${name}/_referrers/${missingSubjectDigest}/${artifactDigest}`)).toBeNull();
+    await createManifest(name, subjectManifest, "latest");
+    const referrers = await getReferrersIndex(name, subjectDigest);
+    expect(referrers.body.manifests.map((descriptor) => descriptor.digest)).toEqual([artifactDigest]);
   });
 
   test("PUT /v2/:name/manifests/:reference rejects invalid subject-bearing OCI indexes", async () => {
