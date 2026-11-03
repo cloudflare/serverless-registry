@@ -479,7 +479,7 @@ export class R2Registry implements Registry {
   ): Promise<PutManifestResponse | RegistryError> {
     const key = await this.gc.markForInsertion(namespace);
     try {
-      return this.putManifestInner(
+      return await this.putManifestInner(
         namespace,
         reference,
         readableStream,
