@@ -19,7 +19,7 @@
     "@tsndr/cloudflare-worker-jwt": "^3.2.3",
     "itty-router": "^5.0.24",
     "rfc4648": "^1.5.4",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.3",
