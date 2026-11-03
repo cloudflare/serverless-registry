@@ -7,6 +7,7 @@ import { RegistryAuthProtocolTokenPayload, RegistryTokenCapability } from "../sr
 import { registries } from "../src/registry/registry";
 import type { ReferrerDescriptor } from "../src/registry/registry";
 import { isDockerDotIO, RegistryHTTPClient } from "../src/registry/http";
+import { R2Registry } from "../src/registry/r2";
 import { ManifestSchema } from "../src/manifest";
 import { limit } from "../src/chunk";
 import worker from "../index";
@@ -2507,6 +2508,45 @@ describe("garbage collector", () => {
       const listBlobs = await bindings.REGISTRY.list({ prefix: `${prodName}/blobs/` });
       expect(listBlobs.objects.length).toEqual(0);
     }
+  });
+
+  test("keeps the insertion marker until the manifest is written", async () => {
+    const name = "hello";
+    const manifest = await generateManifest(name);
+    const bindings = env as Env;
+    let gcError: unknown;
+    let gc: Promise<void> | undefined;
+    // Run a garbage collection right before the manifest is written to R2.
+    const registry = new Proxy(bindings.REGISTRY, {
+      get(target, prop) {
+        if (prop === "put") {
+          return async (...args: Parameters<R2Bucket["put"]>) => {
+            if (args[0].startsWith(`${name}/manifests/`)) {
+              gc ??= new R2Registry(bindings).garbageCollection(name, "unreferenced").then(
+                () => {},
+                (err) => {
+                  gcError = err;
+                },
+              );
+              await gc;
+            }
+            return target.put(...args);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const client = new R2Registry({ ...bindings, REGISTRY: registry });
+    const res = await client.putManifest(name, "v1", new Blob([JSON.stringify(manifest)]).stream(), {
+      contentType: "application/vnd.oci.image.manifest.v1+json",
+    });
+    expect("response" in res).toBeFalsy();
+    expect(gc).toBeDefined();
+    // The garbage collection must not delete the layers of the manifest being written.
+    const listBlobs = await bindings.REGISTRY.list({ prefix: `${name}/blobs/` });
+    expect(listBlobs.objects.length).toEqual(2);
+    expect(gcError).toBeInstanceOf(Error);
   });
 });
 
