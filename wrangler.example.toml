@@ -13,7 +13,7 @@ compatibility_flags = ["nodejs_compat"]
 ## Production
 [env.production]
 r2_buckets = [
-  { binding = "REGISTRY", bucket_name = "" }
+  { binding = "REGISTRY", bucket_name = "r2-registry" }
 ]
 
 [env.production.vars]

@@ -33,7 +33,8 @@ $ cp wrangler.example.toml wrangler.toml
 $ npx wrangler --env production r2 bucket create r2-registry
 ```
 
-Add this to your wrangler config file:
+The example config files already bind it as `REGISTRY` with `bucket_name` set to `r2-registry` (Wrangler refuses an empty
+`bucket_name`, so the bucket commands would not run). If you use another bucket name, set it in your wrangler config file:
 
 ```jsonc
 // wrangler.jsonc
