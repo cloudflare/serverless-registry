@@ -35,26 +35,23 @@ v2Router.get("/", async (_req, _env: Env) => {
 
 v2Router.get("/_catalog", async (req, env: Env) => {
   const { n, last } = req.query;
-  const response = await env.REGISTRY_CLIENT.listRepositories(
-    n ? parseInt(n?.toString()) : undefined,
-    last?.toString(),
-  );
+  const limit = n ? parseInt(n?.toString()) : undefined;
+  const response = await env.REGISTRY_CLIENT.listRepositories(limit, last?.toString());
   if ("response" in response) {
     return response.response;
   }
 
-  const url = new URL(req.url);
-  return new Response(
-    JSON.stringify({
-      repositories: response.repositories,
-    }),
-    {
-      headers: {
-        "Link": `${url.protocol}//${url.hostname}${url.pathname}?n=${n ?? 1000}&last=${response.cursor ?? ""}; rel=next`,
-        "Content-Type": "application/json",
-      },
-    },
-  );
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // A full page may be followed by more repositories; a short page is the last one. Without this the Link of the last page
+  // starts the listing again, and a client that follows Link until it is gone (crane catalog, containerd) never stops.
+  if (response.cursor !== undefined && response.repositories.length >= (limit ?? 1000)) {
+    const url = new URL(req.url);
+    url.searchParams.set("n", `${limit ?? 1000}`);
+    url.searchParams.set("last", response.cursor);
+    headers.Link = formatNextLink(url);
+  }
+
+  return new Response(JSON.stringify({ repositories: response.repositories }), { headers });
 });
 
 v2Router.delete("/:name+/manifests/:reference", async (req, env: Env) => {
@@ -670,7 +667,7 @@ v2Router.get("/:name+/tags/list", async (req, env: Env) => {
   };
   // Only supply a next link if the previous result is truncated
   if (tags.truncated) {
-    responseHeaders.Link = `${url.toString()}; rel=next`;
+    responseHeaders.Link = formatNextLink(url);
   }
   return new Response(
     JSON.stringify({
