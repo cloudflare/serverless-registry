@@ -113,9 +113,13 @@ function shuffleArray<T>(array: T[]) {
 }
 
 function parseLinkHeaderURL(link: string): URL {
-  const rawURL = link.split(";")[0].trim();
-  const href = rawURL.startsWith("<") && rawURL.endsWith(">") ? rawURL.slice(1, -1) : rawURL;
-  return new URL(href);
+  // RFC 8288: <URI-reference>; param=value. Clients such as crane and containerd reject a Link without the angle brackets.
+  const match = /^<([^>]+)>;\s*rel="?next"?$/.exec(link.trim());
+  if (match === null) {
+    throw new Error(`not a rel="next" Link header: ${link}`);
+  }
+
+  return new URL(match[1]);
 }
 
 function numberedDigest(index: number): string {
@@ -417,6 +421,54 @@ describe("v2 manifests", () => {
     const tagsResEmpty = await fetch(createRequest("GET", `/v2/hello-world-list-empty/tags/list`, null));
     const tagsEmpty = (await tagsResEmpty.json()) as TagsList;
     expect(tagsEmpty.tags).toHaveLength(0);
+  });
+
+  test("tags/list pages with a Link header that follows RFC 8288 and ends on the last page", async () => {
+    for (const tag of ["a", "b", "c"]) {
+      await createManifest("hello-world-link", await generateManifest("hello-world-link"), tag);
+    }
+
+    const seen: string[] = [];
+    let request = new Request("https://registry.com:8443/v2/hello-world-link/tags/list?n=2", { method: "GET" });
+    for (let page = 0; page < 5; page++) {
+      const response = await fetch(request);
+      expect(response.ok).toBeTruthy();
+      seen.push(...((await response.json()) as TagsList).tags);
+      const link = response.headers.get("Link");
+      if (link === null) {
+        break;
+      }
+      const next = parseLinkHeaderURL(link);
+      expect(next.origin).toEqual("https://registry.com:8443");
+      request = new Request(next, { method: "GET" });
+    }
+
+    expect(seen).toEqual(["a", "b", "c"]);
+  });
+
+  test("catalog pages with a Link header that follows RFC 8288, keeps the port and ends on the last page", async () => {
+    for (const name of ["link-a", "link-b", "link-c"]) {
+      await createManifest(name, await generateManifest(name), "latest");
+    }
+
+    const seen: string[] = [];
+    let request = new Request("https://registry.com:8443/v2/_catalog?n=2", { method: "GET" });
+    for (let page = 0; page < 5; page++) {
+      const response = await fetch(request);
+      expect(response.ok).toBeTruthy();
+      seen.push(...((await response.json()) as { repositories: string[] }).repositories);
+      const link = response.headers.get("Link");
+      if (link === null) {
+        break;
+      }
+      const next = parseLinkHeaderURL(link);
+      expect(next.origin).toEqual("https://registry.com:8443");
+      expect(next.pathname).toEqual("/v2/_catalog");
+      request = new Request(next, { method: "GET" });
+    }
+
+    expect(seen.filter((name) => name.startsWith("link-"))).toEqual(["link-a", "link-b", "link-c"]);
+    expect(new Set(seen).size).toEqual(seen.length);
   });
 
   test("Upload manifests with recursive layer mounting", async () => {
