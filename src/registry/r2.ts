@@ -10,7 +10,7 @@ import {
   split,
 } from "../chunk";
 import { InternalError, ManifestError, RangeError, ServerError } from "../errors";
-import { SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
+import { SHA256_PREFIX, SHA256_PREFIX_LEN, getSHA256, hexToDigest, isValidDigest } from "../user";
 import { readableToBlob, readerToBlob, wrap } from "../utils";
 import { BlobUnknownError, ManifestUnknownError } from "../v2-errors";
 import {
@@ -33,6 +33,9 @@ import { GarbageCollectionMode, GarbageCollector } from "./garbage-collector";
 import { ManifestSchema, manifestSchema } from "../manifest";
 
 export const ociImageIndexContentType = "application/vnd.oci.image.index.v1+json";
+
+// The OCI distribution spec's tag grammar, checked in putManifestInner.
+const ociTagPattern = /^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$/;
 
 function referrersPrefix(name: string, digest: string): string {
   return `${name}/_referrers/${digest}/`;
@@ -509,6 +512,17 @@ export class R2Registry implements Registry {
     shaWriter.close();
     const digest = await sha256.digest;
     const digestStr = hexToDigest(digest);
+    // A digest reference must be these bytes' digest, and any other reference a valid OCI tag; otherwise a
+    // manifest could be stored under a digest it doesn't have.
+    if (isValidDigest(reference) || reference.startsWith(`${SHA256_PREFIX}:`)) {
+      if (reference !== digestStr) {
+        return {
+          response: new ManifestError("DIGEST_INVALID", `manifest digest ${digestStr} does not match ${reference}`),
+        };
+      }
+    } else if (!ociTagPattern.test(reference)) {
+      return { response: new ManifestError("TAG_INVALID", "invalid tag") };
+    }
     const text = await blob.text();
     let manifestJSON: unknown;
     try {
