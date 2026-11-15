@@ -2528,3 +2528,16 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("upload chunk size", () => {
+  // Cloudflare's Free and Pro plans refuse request bodies over 100 MB before a Worker sees them, and a
+  // client sends PATCH bodies of the advertised OCI-Chunk-Max-Length.
+  test("uploads advertise 90 MB chunks, under a 100 MB request body limit", async () => {
+    const started = await fetch(createRequest("POST", "/v2/hello-chunks/blobs/uploads/", null));
+    expect(started.status).toBe(202);
+    expect(started.headers.get("oci-chunk-max-length")).toBe("90000000");
+    const status = await fetch(createRequest("GET", started.headers.get("location")!, null));
+    expect(status.status).toBe(204);
+    expect(status.headers.get("oci-chunk-max-length")).toBe("90000000");
+  });
+});
