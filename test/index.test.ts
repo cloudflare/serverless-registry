@@ -2528,3 +2528,20 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("garbage collection and nested repositories", () => {
+  test("a symlink in name/sub keeps the blob of name", async () => {
+    const schema = await generateManifest("hello");
+    const { sha256 } = await createManifest("hello", schema, "v1");
+    await mountLayersFromManifest("hello", schema, "hello/nested");
+    await createManifest("hello/nested", schema, "v1");
+
+    // hello no longer references its blobs; hello/nested still does, through symlinks to them.
+    expect((await fetch(createRequest("DELETE", `/v2/hello/manifests/${sha256}`, null))).status).toBe(202);
+    const gc = await fetch(createRequest("POST", "/v2/hello/gc?mode=unreferenced", null));
+    expect(gc.status).toBe(200);
+    for (const digest of getLayersFromManifest(schema)) {
+      expect((await fetch(createRequest("GET", `/v2/hello/nested/blobs/${digest}`, null))).status, digest).toBe(200);
+    }
+  });
+});

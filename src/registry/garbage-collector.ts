@@ -359,8 +359,13 @@ export class GarbageCollector {
     if (unreferencedBlobs.size >= 0) {
       await this.list("", async (object) => {
         const objectPath = object.key;
-        // Skip non-blobs object and from any other repository (symlink only target cross repository blobs)
-        if (objectPath.startsWith(`${options.name}/`) || !objectPath.includes("/blobs/sha256:")) {
+        // Skip non-blobs object and from any other repository (symlink only target cross repository blobs).
+        // Only this repository's own blobs are skipped: `startsWith(name + "/")` also skipped nested
+        // repositories (name/sub), whose symlinks then didn't protect name's blobs.
+        if (
+          !objectPath.includes("/blobs/sha256:") ||
+          objectPath.slice(0, objectPath.lastIndexOf("/blobs/")) === options.name
+        ) {
           return true;
         }
         if (object.customMetadata && object.customMetadata[symlinkHeader] !== undefined) {
