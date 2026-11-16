@@ -8,8 +8,10 @@ export const MINIMUM_CHUNK = 1024 * 1024 * 5;
 // 5GiB
 export const MAXIMUM_CHUNK = MINIMUM_CHUNK * 1024;
 
-// 100MB
-export const MAXIMUM_CHUNK_UPLOAD_SIZE = 1000 * 1000 * 100;
+// 90MB. It is the OCI-Chunk-Max-Length clients size their PATCH bodies by (the push tool does), and
+// Cloudflare's Free and Pro plans refuse request bodies over 100 MB (413) before the Worker sees them, so
+// exactly 100 MB leaves no margin.
+export const MAXIMUM_CHUNK_UPLOAD_SIZE = 1000 * 1000 * 90;
 
 export const getHelperR2Path = (id: string): string => {
   return `${id}-helper`;
