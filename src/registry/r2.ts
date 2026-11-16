@@ -479,7 +479,9 @@ export class R2Registry implements Registry {
   ): Promise<PutManifestResponse | RegistryError> {
     const key = await this.gc.markForInsertion(namespace);
     try {
-      return this.putManifestInner(
+      // `return await`, so the finally block releases the insertion lock after the write, not as soon as
+      // putManifestInner returns its promise.
+      return await this.putManifestInner(
         namespace,
         reference,
         readableStream,

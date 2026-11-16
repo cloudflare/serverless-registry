@@ -2528,3 +2528,48 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("the GC insertion lock", () => {
+  test("is held until the manifest is written", async () => {
+    const name = "hello-insertion-lock";
+    const data = JSON.stringify(await generateManifest(name));
+    const events: string[] = [];
+    const real = (env as Env).REGISTRY;
+    // Manifest writes are slowed down, so that releasing the lock before the write shows in the order.
+    const recording = new Proxy(real, {
+      get(target, prop) {
+        if (prop === "put") {
+          return async (key: string, ...rest: unknown[]) => {
+            const result = await (target.put as (...args: unknown[]) => Promise<R2Object | null>)(key, ...rest);
+            if (key.includes("/manifests/")) {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+              events.push(`wrote ${key}`);
+            }
+            return result;
+          };
+        }
+        if (prop === "delete") {
+          return async (keys: string | string[]) => {
+            events.push(`delete ${keys}`);
+            return target.delete(keys);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const req = createRequest("PUT", `/v2/${name}/manifests/v1`, new Blob([data]).stream(), {
+      "Content-Type": "application/gzip",
+    });
+    req.headers.append("Authorization", usernamePasswordToAuth(username, "world"));
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, { ...(env as Env), REGISTRY: recording }, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(201);
+
+    const released = events.findIndex((e) => e.startsWith(`delete ${name}/insertion/`) && !e.includes("last_update"));
+    const written = events.lastIndexOf(`wrote ${name}/manifests/v1`);
+    expect(written, events.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(released, events.join("\n")).toBeGreaterThan(written);
+  });
+});
