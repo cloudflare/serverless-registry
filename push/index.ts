@@ -131,7 +131,8 @@ for (const layer of manifest.Layers) {
       }
 
       const inprogressPath = path.join(cacheFolder, layerName + "-in-progress");
-      await rm(inprogressPath, { recursive: true });
+      // `force`: the path is usually absent, and Bun (1.3) rejects rm() of a missing path with ENOENT.
+      await rm(inprogressPath, { recursive: true, force: true });
 
       const hasher = new Bun.CryptoHasher("sha256");
       const cacheWriter = file(inprogressPath).writer();
