@@ -2528,3 +2528,48 @@ test("docker.io", () => {
     }
   }
 });
+
+describe("manifest references", () => {
+  const put = (name: string, reference: string, data: string) =>
+    fetch(
+      createRequest("PUT", `/v2/${name}/manifests/${reference}`, new Blob([data]).stream(), {
+        "Content-Type": "application/gzip",
+      }),
+    );
+  const code = async (res: Response) => ((await res.json()) as { errors: { code: string }[] }).errors[0].code;
+
+  test("a digest reference must be the digest of the manifest it carries", async () => {
+    const name = "hello-references";
+    const data = JSON.stringify(await generateManifest(name));
+    const digest = await getSHA256(data);
+    const other = await getSHA256("some other manifest");
+
+    const wrong = await put(name, other, data);
+    expect(wrong.status).toBe(400);
+    expect(await code(wrong)).toBe("DIGEST_INVALID");
+    expect((await fetch(createRequest("GET", `/v2/${name}/manifests/${other}`, null))).status).toBe(404);
+    // Anything with digest syntax (algorithm:encoded), and any sha256: reference, is a digest.
+    for (const reference of ["sha256:abc", `sha512:${"0".repeat(128)}`, "bad:tag"]) {
+      const res = await put(name, reference, data);
+      expect(res.status, reference).toBe(400);
+      expect(await code(res), reference).toBe("DIGEST_INVALID");
+    }
+
+    const right = await put(name, digest, data);
+    expect(right.status).toBe(201);
+    expect(right.headers.get("docker-content-digest")).toBe(digest);
+  });
+
+  test("a tag must match the OCI tag grammar", async () => {
+    const name = "hello-tags";
+    const data = JSON.stringify(await generateManifest(name));
+    for (const tag of [".hidden", "-dash", "a".repeat(129), "bad+tag", "tag:"]) {
+      const res = await put(name, tag, data);
+      expect(res.status, tag).toBe(400);
+      expect(await code(res), tag).toBe("TAG_INVALID");
+    }
+    for (const tag of ["6de0bc9", "_x", "v1.2.3-rc_1", "A".repeat(128)]) {
+      expect((await put(name, tag, data)).status, tag).toBe(201);
+    }
+  });
+});
